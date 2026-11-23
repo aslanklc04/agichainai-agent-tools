@@ -1,0 +1,23 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.aslanklc04/agichainai-agent-tools",
+  "title": "AGIChainAI",
+  "description": "AGI token on Base: price, quotes, swaps, paid tasks, on-chain notary and agent directory.",
+  "repository": { "url": "https://github.com/aslanklc04/agichainai-agent-tools", "source": "github" },
+  "websiteUrl": "https://agichainai.com/exchange/agents.html",
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "agichainai-agent-tools",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        { "name": "AGI_RPC_URL", "description": "Base mainnet RPC URL (default https://mainnet.base.org)", "isRequired": false, "format": "string", "isSecret": false },
+        { "name": "AGENT_PRIVATE_KEY", "description": "Key of a dedicated agent hot wallet with small balances. Omit for read-only use.", "isRequired": false, "format": "string", "isSecret": true },
+        { "name": "AGI_MAX_ETH_PER_SWAP", "description": "Max ETH per buy (default 0.01)", "isRequired": false, "format": "string", "isSecret": false },
+        { "name": "AGI_MAX_AGI_PER_TX", "description": "Max AGI per sell or stake (default 1000000)", "isRequired": false, "format": "string", "isSecret": false }
+      ]
+    }
+  ]
+}

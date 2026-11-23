@@ -16,7 +16,9 @@ import { privateKeyToAccount } from "viem/accounts";
 const realFetch = globalThis.fetch;
 globalThis.fetch = (url, init) => (String(url).includes("cca-lite.coinbase.com") ? Promise.resolve(new Response("{}")) : realFetch(url, init));
 
-const A = JSON.parse(fs.readFileSync(process.env.AGI_TEST_CONFIG || "/tmp/ajan-eklenti.json", "utf8"));
+const CFG = process.env.AGI_TEST_CONFIG || "/tmp/ajan-eklenti.json";
+if (!fs.existsSync(CFG)) { test("local chain not prepared; skipping integration tests", { skip: true }, () => {}); }
+const A = !fs.existsSync(CFG) ? null : JSON.parse(fs.readFileSync(process.env.AGI_TEST_CONFIG || "/tmp/ajan-eklenti.json", "utf8"));
 const KEY = (process.env.AGI_TEST_KEY || fs.readFileSync("/tmp/ajan-key", "utf8")).trim();
 const RPC = "http://127.0.0.1:8545";
 const chain = defineChain({ id: 31337, name: "local", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [RPC] } } });

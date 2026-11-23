@@ -55,5 +55,9 @@
     "type": "git",
     "url": "https://github.com/aslanklc04/agichainai-agent-tools"
   },
-  "homepage": "https://agichainai.com/exchange/agents.html"
+  "homepage": "https://agichainai.com/exchange/agents.html",
+  "mcpName": "io.github.aslanklc04/agichainai-agent-tools",
+  "engines": {
+    "node": ">=18"
+  }
 }
