@@ -1,0 +1,59 @@
+{
+  "name": "agichainai-agent-tools",
+  "version": "0.1.0",
+  "description": "Let AI agents use the AGI token on Base: price, buy/sell, paid tasks, on-chain notary, agent directory. MCP server, Coinbase AgentKit action provider and elizaOS plugin.",
+  "main": "src/core.js",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "keywords": [
+    "agi",
+    "base",
+    "mcp",
+    "agentkit",
+    "elizaos",
+    "ai-agents"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "viem": "^2.58.4",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@coinbase/agentkit": "^0.10.4",
+    "@elizaos/core": "^1.7.2"
+  },
+  "type": "module",
+  "bin": {
+    "agichainai-mcp": "src/mcp.js"
+  },
+  "exports": {
+    ".": "./src/core.js",
+    "./viem": "./src/viem.js",
+    "./mcp": "./src/mcp.js",
+    "./agentkit": "./src/agentkit.js",
+    "./eliza": "./src/eliza.js"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@coinbase/agentkit": ">=0.10",
+    "@elizaos/core": ">=2.0"
+  },
+  "peerDependenciesMeta": {
+    "@coinbase/agentkit": {
+      "optional": true
+    },
+    "@elizaos/core": {
+      "optional": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aslanklc04/agichainai-agent-tools"
+  },
+  "homepage": "https://agichainai.com/exchange/agents.html"
+}
