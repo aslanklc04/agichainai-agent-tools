@@ -1,10 +1,12 @@
-# Publishes to npm and the official MCP Registry when a tag like v0.1.0 is pushed.
+# Publishes to npm and the official MCP Registry when a release tag like v0.1.0 is created,
+# or when started by hand from the Actions tab ("Run workflow").
 # Needs one repository secret: NPM_TOKEN (an npm granular access token with publish rights).
 name: Publish
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -27,8 +29,19 @@ jobs:
       - name: Check that the tools load
         run: node -e "import('./src/viem.js').then(m => { const t = m.createViemAgiTools({}); if (t.length !== 11) process.exit(1); console.log(t.length + ' tools') })"
 
-      - name: Publish package to npm
-        run: npm publish --access public --provenance
+      - name: Publish package to npm (skipped if this version is already there)
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "agichainai-agent-tools@$V" version >/dev/null 2>&1; then
+            echo "agichainai-agent-tools@$V is already on npm"
+          else
+            npm publish --access public --provenance
+          fi
+          for i in $(seq 1 30); do
+            npm view "agichainai-agent-tools@$V" version >/dev/null 2>&1 && { echo "available on npm"; exit 0; }
+            sleep 20
+          done
+          echo "npm has not made $V available yet"; exit 1
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
