@@ -128,9 +128,9 @@ console.log("LP kilidi kontrolü:");
 await k("Yoklama (token'sız) 402 + bazaar", async () => { const [s, j] = await lp(yerel, ""); assert.equal(s, 402); assert.ok(j.extensions.bazaar); });
 await k("Ödemesiz istek 402, fiyat 0,01", async () => { const [s, j] = await lp(yerel, tAcik); assert.equal(s, 402); assert.equal(j.accepts[0].amount, "10000"); });
 const a0 = await bak(odemeUsdc, ajan.address);
-await k("Kilitsiz havuz → UNLOCKED, %100 çekilebilir, 0,01 alındı", async () => {
+await k("Kilitsiz küçük havuz → NOT_LOCKED + rugRisk HIGH, %100 çekilebilir, 0,01 alındı", async () => {
   const [s, j] = await lp(ode, tAcik); assert.equal(s, 200, JSON.stringify(j));
-  assert.equal(j.verdict, "UNLOCKED"); assert.ok(j.v2Pools[0].lp.removablePct > 99.9); assert.ok(j.payment.transaction);
+  assert.equal(j.verdict, "NOT_LOCKED"); assert.equal(j.rugRisk, "HIGH"); assert.ok(j.v2Pools[0].lp.removablePct > 99.9); assert.ok(j.payment.transaction);
   assert.equal(a0 - (await bak(odemeUsdc, ajan.address)), 10000n);
 });
 await k("Yakılmış LP → LOCKED_OR_BURNED (burnedPct ~100)", async () => {
@@ -141,15 +141,15 @@ await k("UNCX'te %90 kilit → MOSTLY_LOCKED, açılış tarihi ~1 yıl sonra", 
   const kk = j.v2Pools[0].lp.lockers[0]; assert.ok(Math.abs(kk.pct - 90) < 0.01); assert.equal(kk.expired, false);
   assert.ok(new Date(kk.earliestUnlock).getTime() / 1000 > simdi + 360 * 86400);
 });
-await k("Süresi dolmuş UNCX kilidi kilitli sayılmaz → UNLOCKED + uyarı", async () => {
-  const [s, j] = await lp(ode, tEski); assert.equal(s, 200); assert.equal(j.verdict, "UNLOCKED"); assert.equal(j.v2Pools[0].lp.lockers[0].expired, true);
+await k("Süresi dolmuş UNCX kilidi kilitli sayılmaz → NOT_LOCKED + uyarı", async () => {
+  const [s, j] = await lp(ode, tEski); assert.equal(s, 200); assert.equal(j.verdict, "NOT_LOCKED"); assert.equal(j.v2Pools[0].lp.lockers[0].expired, true);
   assert.ok(j.notes.some((n) => n.includes("expired")));
 });
 await k("Bizim kilitte (aktif) → LOCKED_OR_BURNED", async () => {
   const [s, j] = await lp(ode, tBiz); assert.equal(s, 200); assert.equal(j.verdict, "LOCKED_OR_BURNED", JSON.stringify(j.v2Pools[0].lp)); assert.ok(j.v2Pools[0].lp.lockers[0].activePct > 99.9);
 });
 await k("Havuzu olmayan token → NO_POOL", async () => { const [s, j] = await lp(ode, tYok); assert.equal(s, 200); assert.equal(j.verdict, "NO_POOL"); });
-await k("AGI'nin V3 havuzu listelenir", async () => { const [s, j] = await lp(ode, AGI); assert.equal(s, 200); assert.ok(j.v3Pools.length >= 1, JSON.stringify(j.v3Pools)); });
+await k("AGI'nin V3 havuzu listelenir; likidite çoğu V3'teyse hüküm buna göre", async () => { const [s, j] = await lp(ode, AGI); assert.equal(s, 200); assert.ok(j.v3Pools.length >= 1, JSON.stringify(j.v3Pools)); assert.ok(["MAIN_LIQUIDITY_IN_V3","NOT_LOCKED","LOCKED_OR_BURNED","PARTIAL","MOSTLY_LOCKED"].includes(j.verdict)); assert.ok(j.interpretation); });
 await k("Kontrat olmayan adres → 400, ücret YOK", async () => {
   const once = await bak(odemeUsdc, ajan.address); const [s] = await lp(ode, operator.address); assert.equal(s, 400); assert.equal(await bak(odemeUsdc, ajan.address), once);
 });

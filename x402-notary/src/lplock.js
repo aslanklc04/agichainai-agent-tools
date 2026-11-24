@@ -34,10 +34,9 @@ export const BASE_LP = {
   v3: { factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD", fees: [100, 500, 3000, 10000] },
   lockers: [
     { name: "UNCX (Uniswap V2)", address: "0xc4E637D37113192F4F1F060DaEbD7758De7F4131", type: "uncx" },
-    { name: "UNCX (Uniswap V2, legacy)", address: "0xED9180976c2a4742C7A57354FD39d8BEc6cbd8AB", type: "uncx" },
     { name: "UNCX (Sushiswap)", address: "0xBeddF48499788607B4c2e704e9099561ab38Aae8", type: "uncx" },
     { name: "UNCX (Aerodrome)", address: "0x30e522deDfFE3e3d11Cd53E27d18Cd4F016eD870", type: "uncx" },
-    { name: "Team Finance", address: "0xE2fE530C047f2d85298b07D9333C05737f1435fB", type: "plain" },
+    { name: "Team Finance", address: "0x4f0fd563be89ec8c3e7d595bf3639128c0a7c33a", type: "plain" },
     { name: "AGIChainAI lock", address: "0x3F6b4d102aFb926cb19Db347D8fE6E6a79eC0E7D", type: "agichainai" },
   ],
 };
@@ -77,20 +76,19 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
     for (const f of ay.v2) adaylar.push({ dex: f.dex, q, p: guvenli(oku(f.factory, V2_FAB, "getPair", [token, q.address])) });
     if (ay.aerodrome) for (const st of [false, true]) adaylar.push({ dex: st ? "aerodrome-stable" : "aerodrome-volatile", q, p: guvenli(oku(ay.aerodrome.factory, AERO_FAB, "getPool", [token, q.address, st])), aero: true });
   }
-  const havuzlar = [];
-  for (const a of adaylar) { const adr = await a.p; if (adr && adr !== zeroAddress) havuzlar.push({ dex: a.dex, q: a.q, pair: getAddress(adr), aero: a.aero }); }
+  const havuzlar = (await Promise.all(adaylar.map(async (a) => { const adr = await a.p; return adr && adr !== zeroAddress ? { dex: a.dex, q: a.q, pair: getAddress(adr), aero: a.aero } : null; }))).filter(Boolean);
 
   // 2) Her havuz için LP dağılımı
-  const sonuc = [];
-  for (const h of havuzlar) {
+  const sonuc = await Promise.all(havuzlar.map(async (h) => {
     const [rez, t0, lpArz] = await Promise.all([oku(h.pair, PAIR, "getReserves"), oku(h.pair, PAIR, "token0"), oku(h.pair, PAIR, "totalSupply")]);
     const tokenIlk = getAddress(t0) === token;
     const rToken = tokenIlk ? rez[0] : rez[1], rQuote = tokenIlk ? rez[1] : rez[0];
     const qUsd = usd(h.q, rQuote);
     const yakilan = (await Promise.all(YAKMA.map((a) => oku(h.pair, ERC20, "balanceOf", [a])))).reduce((s, x) => s + x, 0n);
+    const bakiyeler = await Promise.all(ay.lockers.map((L) => oku(h.pair, ERC20, "balanceOf", [L.address]).catch(() => 0n)));
     const kilitler = [];
-    for (const L of ay.lockers) {
-      const bak = await oku(h.pair, ERC20, "balanceOf", [L.address]).catch(() => 0n);
+    for (const [i, L] of ay.lockers.entries()) {
+      const bak = bakiyeler[i];
       if (bak === 0n) continue;
       const k = { name: L.name, locker: L.address, pct: yuzde(bak, lpArz) };
       if (L.type === "uncx") {
@@ -121,7 +119,7 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
     // Süresi dolmuş UNCX kilidi ve bizim kilitteki süresi dolmuş kısım "kilitli" sayılmaz.
     const lockedPct = kilitler.reduce((s, k) => s + (k.expired ? 0 : k.activePct !== undefined ? k.activePct : k.pct), 0);
     const korunan = Math.min(100, burnedPct + lockedPct);
-    sonuc.push({
+    return ({
       dex: h.dex, pair: h.pair, quote: h.q.sym,
       reserves: { token: formatUnits(rToken, ondalik), [h.q.sym]: formatUnits(rQuote, h.q.dec) },
       liquidityUsd: qUsd === null ? null : Math.round(qUsd * 2 * 100) / 100,
@@ -131,18 +129,19 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
         removablePct: Math.round((100 - korunan) * 10_000) / 10_000,
       },
     });
-  }
+  }));
 
   // 3) V3 havuzları (yalnız varlık ve likidite büyüklüğü)
   const v3 = [];
   if (ay.v3) {
-    for (const q of quotes) for (const fee of ay.v3.fees) {
+    const isler = [];
+    for (const q of quotes) for (const fee of ay.v3.fees) isler.push((async () => {
       const p = await guvenli(oku(ay.v3.factory, V3_FAB, "getPool", [token, q.address, fee]));
-      if (!p || p === zeroAddress) continue;
-      const qBak = await oku(q.address, ERC20, "balanceOf", [p]).catch(() => 0n);
-      const tBak = await oku(token, ERC20, "balanceOf", [p]).catch(() => 0n);
+      if (!p || p === zeroAddress) return;
+      const [qBak, tBak] = await Promise.all([oku(q.address, ERC20, "balanceOf", [p]).catch(() => 0n), oku(token, ERC20, "balanceOf", [p]).catch(() => 0n)]);
       v3.push({ dex: "uniswap-v3", pool: getAddress(p), fee, quote: q.sym, reserves: { token: formatUnits(tBak, ondalik), [q.sym]: formatUnits(qBak, q.dec) }, liquidityUsd: (() => { const u = usd(q, qBak); return u === null ? null : Math.round(u * 2 * 100) / 100; })() });
-    }
+    })());
+    await Promise.all(isler);
   }
 
   // 4) Hüküm: likiditesi en büyük V2 havuzuna ve likiditeye göre ağırlıklı ortalamaya göre
@@ -154,21 +153,40 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
   })();
   const v2Usd = sonuc.reduce((t, s) => t + (s.liquidityUsd || 0), 0), v3Usd = v3.reduce((t, s) => t + (s.liquidityUsd || 0), 0);
   let verdict;
+  const gaugeOrani = (() => { const L = sonuc.filter((x) => x.liquidityUsd); const t = L.reduce((q, x) => q + x.liquidityUsd, 0); return t ? L.reduce((q, x) => q + (x.lp.stakedInGaugePct || 0) * x.liquidityUsd, 0) / t : 0; })();
   if (!sonuc.length && !v3.length) verdict = "NO_POOL";
-  else if (!sonuc.length) verdict = "V3_ONLY_NOT_ASSESSED";
+  else if (v3Usd > v2Usd) verdict = "MAIN_LIQUIDITY_IN_V3";
   else {
     const p = agirlikli ?? (100 - sonuc[0].lp.removablePct);
-    verdict = p >= 95 ? "LOCKED_OR_BURNED" : p >= 80 ? "MOSTLY_LOCKED" : p >= 20 ? "PARTIAL" : "UNLOCKED";
+    verdict = p >= 95 ? "LOCKED_OR_BURNED" : p >= 80 ? "MOSTLY_LOCKED" : p >= 20 ? "PARTIAL" : "NOT_LOCKED";
   }
+  // Kilitsiz likidite her zaman dolandırıcılık riski değildir: büyük ve teşvik havuzuna yatırılmış likidite genelde çok sayıda bağımsız sağlayıcıya aittir.
+  let rugRisk;
+  if (verdict === "NO_POOL") rugRisk = "NO_LIQUIDITY";
+  else if (verdict === "LOCKED_OR_BURNED") rugRisk = "LOW";
+  else if (verdict === "MAIN_LIQUIDITY_IN_V3") rugRisk = "NOT_ASSESSED";
+  else if (v2Usd >= 250_000 || gaugeOrani >= 50) rugRisk = verdict === "MOSTLY_LOCKED" ? "LOW" : "MEDIUM";
+  else rugRisk = verdict === "MOSTLY_LOCKED" ? "MEDIUM" : "HIGH";
+  const yorum = {
+    NO_POOL: "No pool against WETH or USDC was found on Uniswap V2/V3, Aerodrome or AGIChainAI.",
+    MAIN_LIQUIDITY_IN_V3: "Most liquidity sits in Uniswap V3 positions (NFTs); their lock status is not assessed by this check. V2-style pool details are still listed.",
+    LOCKED_OR_BURNED: "At least 95% of the V2-style LP (liquidity-weighted) is burned or in a known locker: it cannot be pulled before the unlock dates shown.",
+    MOSTLY_LOCKED: "80-95% of the V2-style LP is burned or locked; the rest can be withdrawn by its holders.",
+    PARTIAL: "Only part of the V2-style LP is burned or locked; a large share can be withdrawn by its holders.",
+    NOT_LOCKED: "The V2-style LP is not burned or locked. That is normal for large tokens whose liquidity comes from many independent providers (e.g. staked in Aerodrome gauges), but for a new or small token it means whoever holds the LP can pull the liquidity.",
+  }[verdict];
   const notlar = [];
   if (v3.length) notlar.push(`Uniswap V3 pools hold about $${Math.round(v3Usd)} of liquidity; V3 positions are NFTs and their lock status is not assessed here.`);
-  if (sonuc.some((s) => s.lp.lockers.some((k) => k.expired))) notlar.push("At least one UNCX lock has expired: those LP tokens can be withdrawn by the lock owner.");
-  if (verdict === "UNLOCKED" || verdict === "PARTIAL") notlar.push("Removable LP is held by ordinary wallets or unknown contracts; the holder could pull that liquidity.");
+  if (sonuc.some((x) => x.lp.lockers.some((k) => k.expired))) notlar.push("At least one UNCX lock has expired: those LP tokens can be withdrawn by the lock owner.");
+  if (rugRisk === "HIGH") notlar.push("Small, unlocked liquidity: if the LP is held by the team or a single wallet, it can be pulled at any time.");
 
   return {
     token: { address: token, name: ad, symbol: sembol, decimals: Number(ondalik), totalSupply: formatUnits(arz, ondalik) },
     verdict,
+    rugRisk,
+    interpretation: yorum,
     protectedPctWeightedByLiquidity: agirlikli,
+    stakedInGaugePctWeightedByLiquidity: Math.round(gaugeOrani * 100) / 100,
     v2Pools: sonuc.sort((a, b) => (b.liquidityUsd || 0) - (a.liquidityUsd || 0)),
     v3Pools: v3.sort((a, b) => (b.liquidityUsd || 0) - (a.liquidityUsd || 0)),
     liquidityUsd: { v2Style: Math.round(v2Usd * 100) / 100, v3: Math.round(v3Usd * 100) / 100 },
