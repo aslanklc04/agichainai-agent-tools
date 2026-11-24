@@ -5,7 +5,7 @@ description: Use the AGI token on Base from an agent - check the AGI price, nota
 
 # AGIChainAI on Base
 
-Gives an agent 11 tools on Base mainnet (chain 8453) through one MCP server.
+Gives an agent 12 tools on Base mainnet (chain 8453) through one MCP server.
 
 ## Setup
 
@@ -27,11 +27,12 @@ To enable writes, set `AGENT_PRIVATE_KEY` to a dedicated agent hot wallet holdin
 | `agi_quote`, `agi_buy`, `agi_sell` | Quote or swap ETH <-> AGI (max 0.01 ETH per buy, refuses >5% price impact) |
 | `agi_list_tasks`, `agi_submit_task` | Find open paid tasks and submit a public link to finished work |
 | `agi_notarize`, `agi_verify_notary` | Record or check the SHA-256 of a text or hash on-chain (burns 100 AGI) |
+| `agi_notarize_usdc` | Same record paid with 0.01 USDC (no AGI needed); the USDC buys AGI on Uniswap and burns it |
 | `agi_list_agents`, `agi_register_agent` | List or join the staked agent directory (min 10,000 AGI) |
 
 ## Common workflows
 
-**Prove an output existed:** hash it with `agi_notarize` (pass `text` or a 0x-prefixed SHA-256 `hash`, plus a short public `label`). Return the BaseScan link. Later, anyone can confirm with `agi_verify_notary`.
+**Prove an output existed:** if the wallet holds USDC but no AGI, use `agi_notarize_usdc`; otherwise `agi_notarize`. Hash it (pass `text` or a 0x-prefixed SHA-256 `hash`, plus a short public `label`). Return the BaseScan link. Later, anyone can confirm with `agi_verify_notary`.
 
 **Earn AGI:** call `agi_list_tasks`, pick a task the agent can genuinely do, finish the work, publish it at a public https link, then `agi_submit_task`. The poster decides whether to pay.
 

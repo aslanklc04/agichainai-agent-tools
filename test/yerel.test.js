@@ -112,6 +112,30 @@ test("directory: guards and register", async () => {
   await assert.rejects(run("agi_register_agent", { name: "Bot", profileUrl: "https://bot.example", stakeAgi: "10000" }), /already registered/);
 });
 
+test("USDC notary: pay 0.01 USDC, AGI bought and burned, verify, cross-notary duplicate refused", async () => {
+  const agiBefore = (await run("agi_balance", {})).agi;
+  const r = await run("agi_notarize_usdc", { text: "paid in usdc", label: "usdc" });
+  assert.equal(r.done, true);
+  assert.equal(r.paidUsdc, "0.01");
+  assert.ok(Number(r.expectedBurnedAgi) > 2.5 && Number(r.expectedBurnedAgi) < 3, r.expectedBurnedAgi);
+  assert.ok(r.approveTx);
+  assert.equal((await run("agi_balance", {})).agi, agiBefore); // no AGI needed
+  const v = await run("agi_verify_notary", { text: "paid in usdc" });
+  assert.equal(v.recorded, true);
+  assert.equal(v.paidWith, "USDC");
+  assert.equal(v.label_untrusted, "usdc");
+  await assert.rejects(run("agi_notarize", { text: "paid in usdc" }), /Already recorded/);
+  await assert.rejects(run("agi_notarize_usdc", { text: "hello agents" }), /Already recorded/);
+  const v2 = await run("agi_verify_notary", { text: "hello agents" });
+  assert.equal(v2.paidWith, "AGI");
+});
+
+test("USDC notary refuses when the wallet has no USDC", async () => {
+  const poorKey = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"; // hardhat account #2
+  const poor = createViemAgiTools({ rpcUrl: RPC, privateKey: poorKey, addresses: A, chain });
+  await assert.rejects(T(poor, "agi_notarize_usdc").run({ text: "no usdc here" }), /Needs 0.01 USDC/);
+});
+
 test("wrong chain is refused", async () => {
   const bad = createViemAgiTools({ rpcUrl: RPC, addresses: { ...A, chainId: 8453 }, chain });
   await assert.rejects(T(bad, "agi_market_info").run({}), /expected 8453/);
@@ -124,7 +148,7 @@ test("MCP server lists and calls tools", async () => {
   const client = new Client({ name: "t", version: "1" });
   await client.connect(b);
   const list = await client.listTools();
-  assert.equal(list.tools.length, 11);
+  assert.equal(list.tools.length, 12);
   const r = await client.callTool({ name: "agi_market_info", arguments: {} });
   assert.ok(JSON.parse(r.content[0].text).priceEth > 0);
   const e = await client.callTool({ name: "agi_buy", arguments: { ethAmount: "0.001" } });
@@ -137,7 +161,7 @@ test("AgentKit action provider works with a viem wallet provider", async () => {
   const wp = new ViemWalletProvider(wc);
   const p = agiActionProvider({ addresses: A });
   const actions = p.getActions(wp);
-  assert.equal(actions.length, 11);
+  assert.equal(actions.length, 12);
   const info = actions.find((x) => x.name.endsWith("agi_market_info"));
   const out = JSON.parse(await info.invoke({}));
   assert.ok(out.priceEth > 0);

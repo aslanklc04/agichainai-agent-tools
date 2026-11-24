@@ -15,6 +15,9 @@ export const BASE_MAINNET = {
   pair: "0x8c9d076B9c682B98De8a46ba8fcDAFFd91615CA1",
   tasks: "0x9E20C6A80Dc7Bbf7fdC32d2DD8f8617cf43E104d",
   notary: "0x246a17b76e5F3cdF960683f70D1169677488f514",
+  notaryUsdc: "0x722CC9E982008e55612fB86E184B1730ec9a26Cc",
+  usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  quoter: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
   directory: "0xF934bB0D18902A753Ad47FC57D0BE107b904c3FE",
   ethUsdFeed: "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
   site: "https://agichainai.com/exchange/",
@@ -54,6 +57,16 @@ const NOTARY = parseAbi([
   "function UCRET() view returns (uint256)",
   "function kayit(bytes32 ozet) view returns (Kayit)",
   "function kaydet(bytes32 ozet, string etiket)",
+]);
+const NOTARY_USDC = parseAbi([
+  "struct Kayit { address kaydeden; uint64 zaman; uint64 blok; uint256 yakilanAgi; string etiket; }",
+  "function UCRET() view returns (uint256)",
+  "function kayit(bytes32 ozet) view returns (Kayit)",
+  "function kaydet(bytes32 ozet, string etiket, uint256 asgariAgi) returns (uint256)",
+]);
+const QUOTER = parseAbi([
+  "struct QuoteExactInputSingleParams { address tokenIn; address tokenOut; uint256 amountIn; uint24 fee; uint160 sqrtPriceLimitX96; }",
+  "function quoteExactInputSingle(QuoteExactInputSingleParams params) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)",
 ]);
 const DIRECTORY = parseAbi([
   "struct Ajan { address adres; uint64 kayitZamani; uint64 cikisZamani; uint256 teminat; string ad; string profil; }",
@@ -139,7 +152,7 @@ export function createAgiTools(o) {
           poolEth: formatEther(r.eth), poolAgi: agiStr(r.agi),
           note: "Small pool: large trades move the price a lot. Prices come only from the market.",
           exchange: A.site,
-          contracts: { router: A.router, pair: A.pair, tasks: A.tasks, notary: A.notary, directory: A.directory },
+          contracts: { router: A.router, pair: A.pair, tasks: A.tasks, notary: A.notary, notaryUsdc: A.notaryUsdc, directory: A.directory },
         };
       },
     },
@@ -260,12 +273,35 @@ export function createAgiTools(o) {
       async run({ text, hash, label = "" }) {
         const h = fingerprint(text, hash);
         if (new TextEncoder().encode(label).length > 100) throw new Error("Label is longer than 100 bytes");
-        const existing = await read({ address: A.notary, abi: NOTARY, functionName: "kayit", args: [h] });
-        if (existing.zaman !== 0n) throw new Error(`Already recorded by ${existing.kaydeden} at ${new Date(Number(existing.zaman) * 1000).toISOString()}`);
+        await notRecorded(h);
         const fee = await read({ address: A.notary, abi: NOTARY, functionName: "UCRET" });
         const approveTx = fee > 0n ? await approveExact(A.agi, A.notary, fee) : null;
         const tx = await send({ to: A.notary, data: encodeFunctionData({ abi: NOTARY, functionName: "kaydet", args: [h, label] }) });
         return { done: true, hash: h, burnedAgi: agiStr(fee), approveTx: approveTx && txUrl(approveTx), tx: txUrl(tx), verify: A.site + "notary.html" };
+      },
+    },
+    {
+      name: "agi_notarize_usdc",
+      description: "Record a SHA-256 fingerprint on Base paying 0.01 USDC instead of AGI: the USDC buys AGI on the Uniswap AGI/USDC pool and all of it is burned. Needs only USDC on Base (no AGI). Give the text (hashed locally, never uploaded) or a 0x-prefixed 32-byte hash. Approves exactly 0.01 USDC.",
+      schema: z.object({
+        text: z.string().optional().describe("Content to fingerprint; only its SHA-256 goes on-chain"),
+        hash: z.string().optional().describe("0x-prefixed 32-byte SHA-256 hash"),
+        label: z.string().max(100).optional().describe("Short public label, max 100 bytes. Never put personal data here."),
+      }),
+      async run({ text, hash, label = "" }) {
+        const h = fingerprint(text, hash);
+        if (new TextEncoder().encode(label).length > 100) throw new Error("Label is longer than 100 bytes");
+        await notRecorded(h);
+        const who = await me();
+        const fee = await read({ address: A.notaryUsdc, abi: NOTARY_USDC, functionName: "UCRET" });
+        const bal = await read({ address: A.usdc, abi: ERC20, functionName: "balanceOf", args: [who] });
+        if (bal < fee) throw new Error(`Needs ${formatUnits(fee, 6)} USDC on Base; wallet has ${formatUnits(bal, 6)}`);
+        const [quoted] = await read({ address: A.quoter, abi: QUOTER, functionName: "quoteExactInputSingle", args: [{ tokenIn: A.usdc, tokenOut: A.agi, amountIn: fee, fee: 10000, sqrtPriceLimitX96: 0n }] });
+        if (quoted === 0n) throw new Error("The AGI/USDC pool has no AGI to sell right now");
+        const minAgi = (quoted * BigInt(10000 - L.maxSlippageBps)) / 10000n;
+        const approveTx = await approveExact(A.usdc, A.notaryUsdc, fee);
+        const tx = await send({ to: A.notaryUsdc, data: encodeFunctionData({ abi: NOTARY_USDC, functionName: "kaydet", args: [h, label, minAgi] }) });
+        return { done: true, hash: h, paidUsdc: formatUnits(fee, 6), expectedBurnedAgi: agiStr(quoted), approveTx: approveTx && txUrl(approveTx), tx: txUrl(tx), verify: A.site + "notary.html" };
       },
     },
     {
@@ -274,9 +310,9 @@ export function createAgiTools(o) {
       schema: z.object({ text: z.string().optional(), hash: z.string().optional() }),
       async run({ text, hash }) {
         const h = fingerprint(text, hash);
-        const k = await read({ address: A.notary, abi: NOTARY, functionName: "kayit", args: [h] });
-        if (k.zaman === 0n) return { hash: h, recorded: false };
-        return { hash: h, recorded: true, by: k.kaydeden, time: new Date(Number(k.zaman) * 1000).toISOString(), block: Number(k.blok), label_untrusted: k.etiket };
+        const k = await findRecord(h);
+        if (!k) return { hash: h, recorded: false };
+        return { hash: h, recorded: true, by: k.kaydeden, time: new Date(Number(k.zaman) * 1000).toISOString(), block: Number(k.blok), paidWith: k.via, label_untrusted: k.etiket };
       },
     },
     {
@@ -320,6 +356,18 @@ export function createAgiTools(o) {
     },
   ];
 
+  // a fingerprint may live in either notary (AGI-paid or USDC-paid)
+  async function findRecord(h) {
+    const a = await read({ address: A.notary, abi: NOTARY, functionName: "kayit", args: [h] });
+    if (a.zaman !== 0n) return { ...a, via: "AGI" };
+    if (!A.notaryUsdc) return null;
+    const u = await read({ address: A.notaryUsdc, abi: NOTARY_USDC, functionName: "kayit", args: [h] });
+    return u.zaman !== 0n ? { ...u, via: "USDC" } : null;
+  }
+  async function notRecorded(h) {
+    const k = await findRecord(h);
+    if (k) throw new Error(`Already recorded by ${k.kaydeden} at ${new Date(Number(k.zaman) * 1000).toISOString()}`);
+  }
   function parseAgi(s) {
     const v = parseUnits(String(s).trim(), 18);
     if (v <= 0n) throw new Error("Amount must be positive");

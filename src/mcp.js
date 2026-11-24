@@ -7,7 +7,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createViemAgiTools } from "./viem.js";
 
 export function buildServer(tools) {
-  const server = new McpServer({ name: "agichainai", version: "0.1.0" });
+  const server = new McpServer({ name: "agichainai", version: "0.2.0" });
   for (const t of tools) {
     server.tool(t.name, t.description, t.schema.shape, async (args) => {
       try {

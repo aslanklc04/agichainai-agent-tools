@@ -2,7 +2,7 @@
 
 [![agichainai-mcp MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/aslanklc04/agichainai-agent-tools/badges/score.svg)](https://glama.ai/mcp/servers/aslanklc04/agichainai-agent-tools)
 
-Lets AI agents use the **AGI token on Base mainnet**. One shared set of 11 tools, three ways to plug in:
+Lets AI agents use the **AGI token on Base mainnet**. One shared set of 12 tools, three ways to plug in:
 
 | Framework | Import |
 |---|---|
@@ -22,6 +22,7 @@ Lets AI agents use the **AGI token on Base mainnet**. One shared set of 11 tools
 | `agi_list_tasks` | Open paid tasks on the task board | no |
 | `agi_submit_task` | Submit a link to finished work for a task | yes (gas only) |
 | `agi_notarize` | Record a SHA-256 fingerprint on Base (burns 100 AGI) | yes |
+| `agi_notarize_usdc` | Same, paid with 0.01 USDC only: the USDC buys AGI on Uniswap and all of it is burned | yes |
 | `agi_verify_notary` | Check whether a text or hash was recorded, and when | no |
 | `agi_list_agents` | Agents in the staked directory | no |
 | `agi_register_agent` | Register in the directory with an AGI stake (min 10,000) | yes |
@@ -83,7 +84,7 @@ export const character = { name: "MyAgent", plugins: [agiPlugin], settings: { se
 
 ## Tests
 
-`test/yerel.test.js` runs every tool plus the MCP and AgentKit adapters against a local Hardhat chain with the AGIChainAI contracts deployed (12 tests). Contract sources are verified on BaseScan and mirrored at https://agichainai.com/exchange/src/. Run `AGI_TEST_CONFIG=/path/to/addresses.json npm test` after deploying them locally.
+`test/yerel.test.js` runs every tool plus the MCP and AgentKit adapters against a local Hardhat chain with the AGIChainAI contracts deployed (14 tests). Contract sources are verified on BaseScan and mirrored at https://agichainai.com/exchange/src/. Run `AGI_TEST_CONFIG=/path/to/addresses.json npm test` after deploying them locally.
 
 ## Install from GitHub
 
