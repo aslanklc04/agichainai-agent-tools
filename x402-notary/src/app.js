@@ -1,6 +1,7 @@
 // AGIChainAI x402 Notary — ajanlar USDC ile öder, kayıt Base'deki AGI noterine yazılır ve ücretin bir kısmı AGI alıp yakar.
 // Akış (ödeme ÖNCE tahsil edilir): istek → doğrulama → (ödeme yoksa 402) → ödeme doğrula → ödemeyi tahsil et → zincire yaz.
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { x402ResourceServer } from "@x402/core/server";
 import {
   decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader,
@@ -149,6 +150,14 @@ export function uygulamaKur(ay) {
   };
 
   const app = new Hono();
+  // Tarayıcıdaki ödeme sayfaları ve ajanlar için CORS: ödeme başlıkları gönderilebilir ve okunabilir.
+  app.use("*", cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["content-type", "PAYMENT-SIGNATURE", "X-PAYMENT", "Access-Control-Expose-Headers"],
+    exposeHeaders: ["PAYMENT-REQUIRED", "PAYMENT-RESPONSE", "X-PAYMENT-RESPONSE"],
+    maxAge: 86400,
+  }));
 
   const GIRDI_SEMA = {
     type: "object", required: ["hash"], additionalProperties: false,
