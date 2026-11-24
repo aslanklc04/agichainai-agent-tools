@@ -1,6 +1,7 @@
 # Publishes to npm and the official MCP Registry when a release tag like v0.1.0 is created,
 # or when started by hand from the Actions tab ("Run workflow").
-# Needs one repository secret: NPM_TOKEN (an npm granular access token with publish rights).
+# npm: trusted publishing (OIDC) — no token stored anywhere. Configure it once on npmjs.com:
+# package settings -> Trusted Publisher -> GitHub Actions, repo aslanklc04/agichainai-agent-tools, workflow publish.yml.
 name: Publish
 
 on:
@@ -24,6 +25,9 @@ jobs:
           node-version: "lts/*"
           registry-url: "https://registry.npmjs.org"
 
+      - name: Use an npm version that supports trusted publishing
+        run: npm install -g npm@latest
+
       - run: npm ci
 
       - name: Check that the tools load
@@ -35,15 +39,13 @@ jobs:
           if npm view "agichainai-agent-tools@$V" version >/dev/null 2>&1; then
             echo "agichainai-agent-tools@$V is already on npm"
           else
-            npm publish --access public --provenance
+            npm publish --access public
           fi
           for i in $(seq 1 30); do
             npm view "agichainai-agent-tools@$V" version >/dev/null 2>&1 && { echo "available on npm"; exit 0; }
             sleep 20
           done
           echo "npm has not made $V available yet"; exit 1
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
