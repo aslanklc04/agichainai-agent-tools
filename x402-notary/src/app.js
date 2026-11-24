@@ -11,7 +11,7 @@ import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/
 import { createPublicClient, createWalletClient, http, fallback, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-export const SURUM = "1.1.0";
+export const SURUM = "1.2.0";
 
 const NOTER_USDC_ABI = parseAbi([
   "function kaydet(bytes32 ozet, string etiket, uint256 asgariAgi) returns (uint256)",
@@ -108,6 +108,7 @@ export function uygulamaKur(ay) {
   };
 
   let sabitler = null;
+  let sonTahsil = null; // tanı için: son tahsilatta Coinbase'in katalog (bazaar) yanıtı
   // İzin yoksa verir, fiyat teklifi alır ve kaydı simüle eder; kayma payı %5.
   const zincirHazirla = async (ozet, etiketHam) => {
     // UCRET ve HAVUZ_UCRETI değişmez (immutable): bir kez okunur.
@@ -219,7 +220,7 @@ export function uygulamaKur(ay) {
     ]);
     return json(c, {
       ok: eth >= ASGARI_ETH, serviceWallet: hesap.address, version: SURUM, facilitator: ay.facilitatorName || "custom",
-      notaryRecords: Number(sayi), agiBurnedByNotary: formatEther(yak),
+      notaryRecords: Number(sayi), lastSettlement: sonTahsil, agiBurnedByNotary: formatEther(yak),
       serviceWalletEth: formatEther(eth), serviceWalletUsdc: formatUnits(usdc, 6),
     });
   });
@@ -274,10 +275,19 @@ export function uygulamaKur(ay) {
     let dog;
     try { dog = await sunucu.verifyPayment(yuk, sart, bazaar); } catch (e) { return odemeIste("verification failed: " + (e.message || e)); }
     if (!dog.isValid) return odemeIste(dog.invalidReason || "payment invalid");
+    // Bazaar kataloğu, tahsilat isteğinde katalog bilgisini (extensions.bazaar) ve kaynağı ister.
+    // İstemci bunları göndermediyse sunucu ekler; imza yalnızca ödeme yetkisini kapsar, bu alanlar değil.
+    try {
+      const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, undefined, bazaar);
+      yuk.extensions = { ...(pr.extensions || {}), ...(yuk.extensions || {}) };
+      if (!yuk.resource) yuk.resource = pr.resource;
+    } catch (e) { console.error("BAZAAR_ENRICH_FAILED", String(e.message || e)); }
     let tahsil;
     try { tahsil = await sunucu.settlePayment(yuk, sart, bazaar); } catch (e) { return odemeIste("settlement failed: " + (e.message || e)); }
     if (!tahsil.success) return odemeIste(tahsil.errorReason || "settlement failed");
     const odemeBasligi = { "PAYMENT-RESPONSE": encodePaymentResponseHeader(tahsil) };
+    sonTahsil = { zaman: new Date().toISOString(), extensionResponses: tahsil.extensionResponses || tahsil.extensions || null };
+    console.log("SETTLED", JSON.stringify({ tx: tahsil.transaction, ext: sonTahsil.extensionResponses }));
     const odeyen = getAddress(tahsil.payer || dog.payer || yuk.payload?.authorization?.from);
 
     // 4) Zincire yaz (etikete ödeyen eklenir; ön kontrolde aynı uzunlukta yer tutucu ile simüle edildi)
