@@ -89,8 +89,17 @@ await k("Ana sayfa ücretsiz ve açıklayıcı", async () => {
   const r = await yerelFetch("https://x402.test/"); const j = await r.json();
   assert.equal(r.status, 200); assert.ok(j.endpoints["POST /notarize"]);
 });
-await k("Hatalı özet ücretlendirilmeden 400 döner", async () => {
-  const r = await post(yerelFetch, { hash: "0x1234" }); assert.equal(r.status, 400);
+await k("Boş yoklama (keşif aracı) ödeme şartlarını ve bazaar girdi şemasını görür", async () => {
+  const r = await yerelFetch("https://x402.test/notarize", { method: "POST" }); assert.equal(r.status, 402);
+  const j = await r.json(); assert.ok(j.extensions && j.extensions.bazaar, JSON.stringify(j).slice(0, 400));
+});
+await k("Ödeme başlığıyla gelen hatalı özet 400 döner, tahsil edilmez", async () => {
+  const r = await yerelFetch("https://x402.test/notarize", { method: "POST", headers: { "content-type": "application/json", "PAYMENT-SIGNATURE": "eA==" }, body: JSON.stringify({ hash: "0x1234" }) }); assert.equal(r.status, 400);
+});
+await k("openapi.json ve .well-known/x402 keşif belgeleri", async () => {
+  const o = await (await yerelFetch("https://x402.test/openapi.json")).json();
+  assert.equal(o.paths["/notarize"].post["x-payment-info"].price.amount, "0.02");
+  const w = await (await yerelFetch("https://x402.test/.well-known/x402")).json(); assert.equal(w.resources[0], "https://x402.test/notarize");
 });
 await k("Ödemesiz istek 402 ve ödeme şartları döner", async () => {
   const r = await post(yerelFetch, { hash: ozet }); assert.equal(r.status, 402);
@@ -153,4 +162,4 @@ await k("Hizmetin gaz parası yetmiyorsa ödeme ALINMAZ (503)", async () => {
 await k("Durum uç noktası çalışır", async () => {
   const j = await (await yerelFetch("https://x402.test/status")).json(); assert.equal(j.ok, true); assert.ok(j.notaryRecords >= 1);
 });
-console.log(`${gecen}/14 geçti`);
+console.log(`${gecen}/16 geçti`);

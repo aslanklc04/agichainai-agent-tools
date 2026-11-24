@@ -10,6 +10,7 @@ A pay-per-call notary for AI agents. An agent sends the SHA-256 fingerprint of a
 | GET | `/record/{hash}` | free | whether and when a fingerprint was recorded (checks both AGIChainAI notaries) |
 | GET | `/status` | free | service wallet balances, record count |
 | GET | `/` | free | description |
+| GET | `/openapi.json`, `/.well-known/x402` | free | discovery documents (x402scan, Bazaar) |
 
 ```js
 import { wrapFetchWithPaymentFromConfig } from "@x402/fetch";
@@ -26,6 +27,6 @@ const r = await pay(URL + "/notarize", { method: "POST", headers: { "content-typ
 
 ## Run and deploy
 
-- `npm test`: end-to-end test against a local Hardhat chain, with a real x402 client and a local facilitator (14 checks).
+- `npm test`: end-to-end test against a local Hardhat chain, with a real x402 client and a local facilitator (16 checks).
 - `npm run build`: bundles the worker to `dist/`. `dist/worker.js` is the bundle deployed on Cloudflare.
 - Secret: `SERVICE_PRIVATE_KEY`, a dedicated low-balance service wallet. It needs only a little ETH for gas (about 0.000003 ETH per record on Base) and no starting USDC: each payment is settled before the write and covers the notary fee. Before taking payment, the service simulates the write and checks that its gas balance covers the estimated cost. Settlement uses the PayAI facilitator (`FACILITATOR_URL`).

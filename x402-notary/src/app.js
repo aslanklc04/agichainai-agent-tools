@@ -6,6 +6,7 @@ import {
   decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader,
 } from "@x402/core/http";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { createPublicClient, createWalletClient, http, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
@@ -64,6 +65,8 @@ export function uygulamaKur(ay) {
   const yazar = createWalletClient({ account: hesap, chain: ay.chain, transport: http(ay.rpcUrl) });
   const A = Object.fromEntries(Object.entries(ay.adres).map(([k, v]) => [k, getAddress(v)]));
   const sunucu = new x402ResourceServer(ay.facilitator).register(ay.network, new ExactEvmScheme());
+  sunucu.registerExtension(bazaarResourceServerExtension);
+  const fiyatUsd = (Number(ay.fiyatHam) / 1e6).toFixed(2);
   let hazir = null;
   const hazirla = () => (hazir ??= sunucu.initialize().catch((e) => { hazir = null; throw e; }));
 
@@ -136,6 +139,38 @@ export function uygulamaKur(ay) {
 
   const app = new Hono();
 
+  const GIRDI_SEMA = {
+    type: "object", required: ["hash"], additionalProperties: false,
+    properties: {
+      hash: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$", description: "SHA-256 fingerprint of your data, 0x-prefixed hex" },
+      label: { type: "string", maxLength: 50, description: "Optional plain-ASCII note stored with the record" },
+    },
+  };
+  const CIKTI_ORNEK = { ok: true, hash: "0x…", transaction: "0x…", record: { recorded: true, notary: "0x722C…26Cc", time: "2026-11-24T18:00:00.000Z", block: 1, label: "x402:0xPayer… my report", agiBurned: "2.9" }, payment: { payer: "0x…", transaction: "0x…", network: "eip155:8453" } };
+  const bazaar = declareDiscoveryExtension({ method: "POST", bodyType: "json", input: { hash: "0x" + "ab".repeat(32), label: "quarterly report v1" }, inputSchema: GIRDI_SEMA, output: { example: CIKTI_ORNEK } });
+
+  app.get("/openapi.json", (c) => json(c, {
+    openapi: "3.1.0",
+    info: { title: "AGIChainAI x402 Notary", version: SURUM, description: "Write the SHA-256 fingerprint of a file or text to the AGIChainAI notary contract on Base, paid per call in USDC over x402. Proves the data existed unchanged at that time. Part of the fee buys and burns AGI.", contact: { url: "https://agichainai.com" } },
+    servers: [{ url: ay.publicUrl }],
+    paths: {
+      "/notarize": {
+        post: {
+          operationId: "notarize", summary: "Notarize a SHA-256 fingerprint on Base",
+          "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: fiyatUsd } },
+          requestBody: { required: true, content: { "application/json": { schema: GIRDI_SEMA } } },
+          responses: {
+            "200": { description: "Recorded on-chain", content: { "application/json": { example: CIKTI_ORNEK } } },
+            "402": { description: "Payment required (x402 v2, exact, USDC on Base)" },
+            "409": { description: "Already recorded; nothing charged" },
+          },
+        },
+      },
+    },
+    "x-discovery": { ownershipProofs: [] },
+  }));
+  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/notarize"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
+
   app.get("/", async (c) => {
     return json(c, {
       name: "AGIChainAI x402 Notary",
@@ -177,13 +212,27 @@ export function uygulamaKur(ay) {
   });
 
   app.post("/notarize", async (c) => {
+    const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
+    await hazirla();
+    const kaynak = { url: ay.publicUrl + "/notarize", description: "Record a SHA-256 fingerprint on Base (AGIChainAI notary). Part of the fee buys and burns AGI.", mimeType: "application/json", serviceName: "AGIChainAI Notary" };
+    const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: ay.price, network: ay.network, maxTimeoutSeconds: 120 });
+    const odemeIste = async (hata) => {
+      const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, bazaar);
+      return json(c, pr, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) });
+    };
+
     // 1) İstek doğrulama — ödeme alınmadan önce; hatalı istek ücretlendirilmez.
-    let govde;
-    try { govde = await c.req.json(); } catch { return json(c, { error: "Send JSON: {\"hash\":\"0x…\",\"label\":\"optional\"}" }, 400); }
-    const ozet = String(govde.hash || "").toLowerCase();
-    if (!isHex(ozet) || ozet.length !== 66 || ozet === SIFIR) return json(c, { error: "hash must be 0x followed by 64 hex characters (SHA-256)" }, 400);
-    const etiketHam = govde.label === undefined ? "" : String(govde.label);
-    if (!/^[\x20-\x7e]{0,50}$/.test(etiketHam)) return json(c, { error: "label: up to 50 plain ASCII characters" }, 400);
+    //    Ödemesiz keşif yoklamaları (boş gövde) doğrudan ödeme şartlarını görür.
+    let govde = null;
+    try { govde = await c.req.json(); } catch {}
+    const ozet = String((govde && govde.hash) || "").toLowerCase();
+    const etiketHam = govde && govde.label !== undefined ? String(govde.label) : "";
+    const ozetGecerli = isHex(ozet) && ozet.length === 66 && ozet !== SIFIR;
+    const etiketGecerli = /^[\x20-\x7e]{0,50}$/.test(etiketHam);
+    if (!ozetGecerli || !etiketGecerli) {
+      if (!baslik) return odemeIste(govde ? "send JSON {\"hash\":\"0x + 64 hex\",\"label\":\"≤50 ASCII chars\"}" : undefined);
+      return json(c, { error: !ozetGecerli ? "hash must be 0x followed by 64 hex characters (SHA-256)" : "label: up to 50 plain ASCII characters" }, 400);
+    }
 
     const onceki = await kayitBul(ozet);
     if (onceki) return json(c, { error: "This hash is already recorded; nothing was charged.", record: onceki }, 409);
@@ -191,21 +240,11 @@ export function uygulamaKur(ay) {
     const eth = await okur.getBalance({ address: hesap.address });
     if (eth < ASGARI_ETH) return json(c, { error: "Service temporarily unavailable (low gas balance); nothing was charged." }, 503);
 
-    // 2) Zincir tarafı ÖN KONTROL — ödeme alınmadan önce: izin, fiyat teklifi ve kaydın simülasyonu.
-    //    Burada hata olursa hiçbir ücret alınmaz.
+    // 2) Zincir tarafı ÖN KONTROL — ödeme alınmadan önce: izin, fiyat teklifi, kayıt simülasyonu ve gaz.
     let yazHazir;
     try { yazHazir = await zincirHazirla(ozet, etiketHam); }
     catch (e) { console.error("PRECHECK_FAILED", String(e.shortMessage || e.message || e)); return json(c, { error: "Service cannot record right now; nothing was charged." }, 503); }
 
-    // 2) Ödeme şartları
-    await hazirla();
-    const kaynak = { url: ay.publicUrl + "/notarize", description: "Record a SHA-256 fingerprint on Base (AGIChainAI notary). Part of the fee buys and burns AGI.", mimeType: "application/json", serviceName: "AGIChainAI Notary" };
-    const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: ay.price, network: ay.network, maxTimeoutSeconds: 120 });
-    const odemeIste = async (hata) => {
-      const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata);
-      return json(c, pr, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) });
-    };
-    const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
     if (!baslik) return odemeIste();
 
     let yuk;
