@@ -41,8 +41,27 @@ const op = cuzdan(operator);
 const kh = await op.deployContract({ abi: U.abi, bytecode: U.bytecode });
 const odemeUsdc = (await okur.waitForTransactionReceipt({ hash: kh })).contractAddress;
 await okur.waitForTransactionReceipt({ hash: await op.writeContract({ address: odemeUsdc, abi: E20, functionName: "bas", args: [ajan.address, 1_000_000n] }) });
+// Gerçekteki gibi: ödeme token'ı = noterin USDC'si. AGI/USDC %1 havuzunu tam aralıkla aç.
+const NPM = parseAbi(["function mint((address token0,address token1,uint24 fee,int24 tickLower,int24 tickUpper,uint256 amount0Desired,uint256 amount1Desired,uint256 amount0Min,uint256 amount1Min,address recipient,uint256 deadline)) payable returns (uint256,uint128,uint256,uint256)"]);
+const FAB3 = parseAbi(["function createPool(address,address,uint24) returns (address)", "function getPool(address,address,uint24) view returns (address)"]);
+const HAVUZ = parseAbi(["function initialize(uint160)"]);
+const ONAY = parseAbi(["function approve(address,uint256) returns (bool)"]);
+const bekle = async (h) => okur.waitForTransactionReceipt({ hash: await h });
+{
+  const [t0, t1] = AGI.toLowerCase() < odemeUsdc.toLowerCase() ? [AGI, odemeUsdc] : [odemeUsdc, AGI];
+  const agiHam = 1_000_000n * 10n ** 18n, usdcHam = 3_400n * 10n ** 6n;
+  const [r0, r1] = t0 === AGI ? [agiHam, usdcHam] : [usdcHam, agiHam];
+  await bekle(op.writeContract({ address: V.fabrikaV3, abi: FAB3, functionName: "createPool", args: [t0, t1, 10000] }));
+  const havuz = await okur.readContract({ address: V.fabrikaV3, abi: FAB3, functionName: "getPool", args: [t0, t1, 10000] });
+  const kok = (n) => { let x = n, y = (x + 1n) / 2n; while (y < x) { x = y; y = (x + n / x) / 2n; } return x; };
+  await bekle(op.writeContract({ address: havuz, abi: HAVUZ, functionName: "initialize", args: [kok((r1 << 192n) / r0)] }));
+  await bekle(op.writeContract({ address: odemeUsdc, abi: E20, functionName: "bas", args: [operator.address, usdcHam] }));
+  await bekle(op.writeContract({ address: AGI, abi: ONAY, functionName: "approve", args: [V.npm, agiHam] }));
+  await bekle(op.writeContract({ address: odemeUsdc, abi: ONAY, functionName: "approve", args: [V.npm, usdcHam] }));
+  await bekle(op.writeContract({ address: V.npm, abi: NPM, functionName: "mint", args: [{ token0: t0, token1: t1, fee: 10000, tickLower: -887200, tickUpper: 887200, amount0Desired: r0, amount1Desired: r1, amount0Min: 0n, amount1Min: 0n, recipient: operator.address, deadline: 9999999999n }] }));
+}
 const NU = art("noter/AgiNoterUSDC.sol/AgiNoterUSDC.json");
-const nh = await op.deployContract({ abi: NU.abi, bytecode: NU.bytecode, args: [AGI, V.usdc, V.router02, 10000, 10000n] });
+const nh = await op.deployContract({ abi: NU.abi, bytecode: NU.bytecode, args: [AGI, odemeUsdc, V.router02, 10000, 10000n] });
 const noterUsdc = (await okur.waitForTransactionReceipt({ hash: nh })).contractAddress;
 // Hizmet cüzdanının noter için kullandığı USDC (noterin kendi USDC'si) — gerçekte ödemeden gelen USDC ile aynı token
 await okur.waitForTransactionReceipt({ hash: await op.writeContract({ address: V.usdc, abi: E20, functionName: "bas", args: [servis.address, 50_000n] }) });
@@ -56,7 +75,7 @@ const fasilIstemci = { verify: (p, r) => fasil.verify(p, r), settle: async (p, r
 const { app, hesap } = uygulamaKur({
   chain, network: "eip155:31337", rpcUrl: RPC, privateKey: ANAH[1], facilitator: fasilIstemci,
   price: { amount: "20000", asset: odemeUsdc, extra: { name: "USD Coin", version: "2" } },
-  adres: { noterUsdc, noterAgi: N.noter, usdc: V.usdc, agi: AGI, quoter: V.quoter },
+  adres: { noterUsdc, noterAgi: N.noter, usdc: odemeUsdc, agi: AGI, quoter: V.quoter },
   publicUrl: "https://x402.test",
 });
 const yerelFetch = (girdi, ayar) => app.fetch(new Request(girdi, ayar));
@@ -80,15 +99,16 @@ await k("Ödemesiz istek 402 ve ödeme şartları döner", async () => {
 });
 let cevap;
 const a0 = await bak(odemeUsdc, ajan.address), s0 = await bak(odemeUsdc, servis.address), y0 = await bak(AGI, YAKMA);
+await k("Hizmet cüzdanı 0 USDC ile başlıyor (ilk ödeme masrafı karşılar)", async () => { assert.equal(s0, 0n); });
 await k("x402 istemcisi öder, kayıt zincire yazılır", async () => {
   const r = await post(odeyenFetch, { hash: ozet, label: "test report v1" });
   cevap = await r.json();
   assert.equal(r.status, 200, JSON.stringify(cevap)); assert.ok(r.headers.get("PAYMENT-RESPONSE"));
   assert.equal(cevap.record.recorded, true);
 });
-await k("Ajandan tam 0,02 USDC alındı, hizmet cüzdanına geçti", async () => {
+await k("Ajandan tam 0,02 USDC alındı; 0,01'i noter ücretine gitti, 0,01 hizmette kaldı", async () => {
   assert.equal(a0 - (await bak(odemeUsdc, ajan.address)), 20000n);
-  assert.equal((await bak(odemeUsdc, servis.address)) - s0, 20000n);
+  assert.equal((await bak(odemeUsdc, servis.address)) - s0, 10000n);
 });
 await k("Noter ücreti AGI alıp yaktı", async () => {
   const y = (await bak(AGI, YAKMA)) - y0; assert.ok(y > 0n, String(y));
@@ -118,15 +138,19 @@ await k("Bakiyesi yetmeyen ajan ödeyemez, kayıt yapılmaz", async () => {
   const r = await post(f, { hash: o3 }); assert.equal(r.status, 402);
   const j = await (await yerelFetch("https://x402.test/record/" + o3)).json(); assert.equal(j.recorded, false);
 });
-await k("Hizmet kayıt yapamayacaksa ödeme ALINMAZ (503)", async () => {
-  const sc = cuzdan(servis), b = await bak(V.usdc, servis.address);
-  await okur.waitForTransactionReceipt({ hash: await sc.writeContract({ address: V.usdc, abi: parseAbi(["function transfer(address,uint256) returns (bool)"]), functionName: "transfer", args: [operator.address, b] }) });
+await k("Hizmetin gaz parası yetmiyorsa ödeme ALINMAZ (503)", async () => {
+  const sc = cuzdan(servis), e = await okur.getBalance({ address: servis.address });
+  await bekle(sc.sendTransaction({ to: operator.address, value: e - 10n ** 15n }));
+  const sc2 = e; // geri vermek için
+  // eşiğin (0,000005) üstünde ama gerçek kayıt gazının altında 0,0001 ETH kalsın: yine de ücret alınmamalı
+  const e2 = await okur.getBalance({ address: servis.address });
+  await bekle(sc.sendTransaction({ to: operator.address, value: e2 - 100_000_000_000_000n, gas: 21000n }));
   const once = await bak(odemeUsdc, ajan.address), o4 = keccak256(toHex("bos " + Date.now()));
-  const r = await post(odeyenFetch, { hash: o4 }); assert.equal(r.status, 503);
+  const r = await post(odeyenFetch, { hash: o4 }); assert.equal(r.status, 503, String(r.status));
   assert.equal(await bak(odemeUsdc, ajan.address), once);
-  await okur.waitForTransactionReceipt({ hash: await op.writeContract({ address: V.usdc, abi: E20, functionName: "bas", args: [servis.address, 50_000n] }) });
+  await bekle(op.sendTransaction({ to: servis.address, value: 10n ** 17n }));
 });
 await k("Durum uç noktası çalışır", async () => {
   const j = await (await yerelFetch("https://x402.test/status")).json(); assert.equal(j.ok, true); assert.ok(j.notaryRecords >= 1);
 });
-console.log(`${gecen}/13 geçti`);
+console.log(`${gecen}/14 geçti`);

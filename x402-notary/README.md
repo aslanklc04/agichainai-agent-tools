@@ -26,6 +26,6 @@ const r = await pay(URL + "/notarize", { method: "POST", headers: { "content-typ
 
 ## Run and deploy
 
-- `npm test`: end-to-end test against a local Hardhat chain, with a real x402 client and a local facilitator (13 checks).
+- `npm test`: end-to-end test against a local Hardhat chain, with a real x402 client and a local facilitator (14 checks).
 - `npm run build`: bundles the worker to `dist/`. `dist/worker.js` is the bundle deployed on Cloudflare.
-- Secret: `SERVICE_PRIVATE_KEY`, a dedicated low-balance service wallet holding a little ETH for gas and USDC for the notary fee. Settlement uses the PayAI facilitator (`FACILITATOR_URL`).
+- Secret: `SERVICE_PRIVATE_KEY`, a dedicated low-balance service wallet. It needs only a little ETH for gas (about 0.000003 ETH per record on Base) and no starting USDC: each payment is settled before the write and covers the notary fee. Before taking payment, the service simulates the write and checks that its gas balance covers the estimated cost. Settlement uses the PayAI facilitator (`FACILITATOR_URL`).

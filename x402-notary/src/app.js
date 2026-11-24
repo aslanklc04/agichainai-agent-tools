@@ -6,7 +6,7 @@ import {
   decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader,
 } from "@x402/core/http";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
-import { createPublicClient, createWalletClient, http, getAddress, isHex, parseAbi, formatUnits, formatEther } from "viem";
+import { createPublicClient, createWalletClient, http, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 export const SURUM = "1.0.0";
@@ -33,7 +33,7 @@ const QUOTER_ABI = parseAbi([
 ]);
 
 const SIFIR = "0x" + "0".repeat(64);
-const ASGARI_ETH = 20_000_000_000_000n; // 0,00002 ETH: birkaç kaydın gazı
+const ASGARI_ETH = 5_000_000_000_000n; // 0,000005 ETH: Base'de birkaç kaydın gazı
 const ONAY_MIKTARI = 1_000_000n; // noterin bir kerede çekebileceği en fazla USDC: 1 USDC (100 kayıt)
 
 const json = (c, body, status = 200, headers = {}) => {
@@ -58,6 +58,8 @@ function etiketHazirla(payer, etiket) {
  */
 export function uygulamaKur(ay) {
   const hesap = privateKeyToAccount(ay.privateKey);
+  // Fiyat USDC'nin en küçük biriminde (6 ondalık): "$0.02" → 20000
+  ay.fiyatHam = typeof ay.price === "string" ? BigInt(Math.round(Number(ay.price.replace("$", "")) * 1e6)) : BigInt(ay.price.amount);
   const okur = createPublicClient({ chain: ay.chain, transport: http(ay.rpcUrl) });
   const yazar = createWalletClient({ account: hesap, chain: ay.chain, transport: http(ay.rpcUrl) });
   const A = Object.fromEntries(Object.entries(ay.adres).map(([k, v]) => [k, getAddress(v)]));
@@ -80,6 +82,21 @@ export function uygulamaKur(ay) {
     return null;
   };
 
+  // USDC sözleşmesinde hizmet cüzdanının bakiyesinin tutulduğu depolama slotunu bulur (mapping slotu 0–20 denenir).
+  let slotOnbellek = null;
+  const bakiyeSlotu = async () => {
+    if (slotOnbellek) return slotOnbellek;
+    const deneme = 123_456_789n;
+    for (let i = 0n; i <= 20n; i++) {
+      const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [hesap.address, i]));
+      try {
+        const v = await okur.readContract({ address: A.usdc, abi: ERC20_ABI, functionName: "balanceOf", args: [hesap.address], stateOverride: [{ address: A.usdc, stateDiff: [{ slot, value: pad(toHex(deneme), { size: 32 }) }] }] });
+        if (v === deneme) return (slotOnbellek = slot);
+      } catch {}
+    }
+    throw new Error("could not locate USDC balance slot");
+  };
+
   // İzin yoksa verir, fiyat teklifi alır ve kaydı simüle eder; kayma payı %5.
   const zincirHazirla = async (ozet, etiketHam) => {
     const [ucret, havuz, izin] = await Promise.all([
@@ -88,7 +105,14 @@ export function uygulamaKur(ay) {
       okur.readContract({ address: A.usdc, abi: ERC20_ABI, functionName: "allowance", args: [hesap.address, A.noterUsdc] }),
     ]);
     const bakiye = await okur.readContract({ address: A.usdc, abi: ERC20_ABI, functionName: "balanceOf", args: [hesap.address] });
-    if (bakiye < ucret) throw new Error("service wallet has too little USDC for the notary fee");
+    // Cüzdanda henüz USDC yoksa sorun değil: ödeme (fiyat ≥ noter ücreti) yazmadan önce tahsil edilir.
+    // Simülasyonda bu gelecek bakiye, USDC'nin bakiye slotu geçersiz kılınarak (state override) gösterilir.
+    let gecersizKil;
+    if (bakiye < ucret) {
+      if (ay.fiyatHam < ucret) throw new Error("price is below the notary fee");
+      const slot = await bakiyeSlotu();
+      gecersizKil = [{ address: A.usdc, stateDiff: [{ slot, value: pad(toHex(ucret), { size: 32 }) }] }];
+    }
     if (izin < ucret) {
       const h = await yazar.writeContract({ address: A.usdc, abi: ERC20_ABI, functionName: "approve", args: [A.noterUsdc, ONAY_MIKTARI] });
       const m = await okur.waitForTransactionReceipt({ hash: h });
@@ -97,7 +121,16 @@ export function uygulamaKur(ay) {
     const { result } = await okur.simulateContract({ address: A.quoter, abi: QUOTER_ABI, functionName: "quoteExactInputSingle", args: [{ tokenIn: A.usdc, tokenOut: A.agi, amountIn: ucret, fee: havuz, sqrtPriceLimitX96: 0n }] });
     const asgari = (result[0] * 95n) / 100n;
     if (asgari === 0n) throw new Error("no AGI liquidity");
-    await okur.simulateContract({ account: hesap, address: A.noterUsdc, abi: NOTER_USDC_ABI, functionName: "kaydet", args: [ozet, etiketHazirla("0x" + "0".repeat(40), etiketHam), asgari] });
+    const kayitArg = { account: hesap, address: A.noterUsdc, abi: NOTER_USDC_ABI, functionName: "kaydet", args: [ozet, etiketHazirla("0x" + "0".repeat(40), etiketHam), asgari], stateOverride: gecersizKil };
+    await okur.simulateContract(kayitArg);
+    // Gaz parası gerçekten yetiyor mu? (tahmin × en yüksek ücret × 1,5 güvenlik payı)
+    // (bakiye geçersiz kılınıyorsa her düğüm gaz tahmininde bunu desteklemez; o durumda cömert sabit 400k gaz kullanılır)
+    const [gaz, ucretler, eth] = await Promise.all([
+      gecersizKil ? 400_000n : okur.estimateContractGas(kayitArg),
+      okur.estimateFeesPerGas(), okur.getBalance({ address: hesap.address }),
+    ]);
+    const gerekli = (gaz * (ucretler.maxFeePerGas ?? ucretler.gasPrice) * 3n) / 2n;
+    if (eth < gerekli) throw new Error(`low gas balance: need ${formatEther(gerekli)} ETH`);
     return { asgari };
   };
 
