@@ -3,6 +3,7 @@ import { base } from "viem/chains";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { uygulamaKur } from "./app.js";
+import { BASE_LP } from "./lplock.js";
 
 const BASE = {
   noterUsdc: "0x722CC9E982008e55612fB86E184B1730ec9a26Cc",
@@ -10,6 +11,7 @@ const BASE = {
   usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   agi: "0x77c444d787400be0DCE69626ef1234ce7E0CEE80",
   quoter: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+  router02: "0x2626664c2603336E57B271c5C0b26F421741e481",
 };
 
 let onbellek = null;
@@ -34,6 +36,8 @@ function kur(env, url) {
     facilitatorName: env.CDP_API_KEY_ID && env.CDP_API_KEY_SECRET ? "coinbase-cdp" : "payai",
     price: env.PRICE || "$0.02",
     adres: BASE,
+    lp: BASE_LP,
+    lpPrice: env.LP_PRICE || "$0.01",
     publicUrl: env.PUBLIC_URL || new URL(url).origin,
   });
   return onbellek;

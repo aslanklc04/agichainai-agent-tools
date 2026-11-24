@@ -10,8 +10,9 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { createPublicClient, createWalletClient, http, fallback, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { lpKilitAnalizi } from "./lplock.js";
 
-export const SURUM = "1.2.1";
+export const SURUM = "1.3.0";
 
 const NOTER_USDC_ABI = parseAbi([
   "function kaydet(bytes32 ozet, string etiket, uint256 asgariAgi) returns (uint256)",
@@ -30,6 +31,10 @@ const ERC20_ABI = parseAbi([
   "function allowance(address,address) view returns (uint256)",
   "function approve(address,uint256) returns (bool)",
 ]);
+const ROUTER02_ABI = parseAbi([
+  "function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)",
+]);
+const YAKMA_ADRESI = "0x000000000000000000000000000000000000dEaD";
 const QUOTER_ABI = parseAbi([
   "function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns (uint256 amountOut,uint160,uint32,uint256)",
 ]);
@@ -175,6 +180,14 @@ export function uygulamaKur(ay) {
     info: { title: "AGIChainAI x402 Notary", version: SURUM, description: "Write the SHA-256 fingerprint of a file or text to the AGIChainAI notary contract on Base, paid per call in USDC over x402. Proves the data existed unchanged at that time. Part of the fee buys and burns AGI.", contact: { url: "https://agichainai.com" } },
     servers: [{ url: ay.publicUrl }],
     paths: {
+      "/lp-lock": {
+        get: {
+          operationId: "lpLockCheck", summary: "Is this Base token's liquidity locked? (rug-pull check)",
+          "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: LP_USD } },
+          parameters: [{ name: "token", in: "query", required: true, schema: LP_GIRDI_SEMA.properties.token }],
+          responses: { "200": { description: "Lock analysis", content: { "application/json": { example: LP_ORNEK } } }, "402": { description: "Payment required (x402 v2, exact, USDC on Base)" }, "400": { description: "Invalid token; nothing charged" } },
+        },
+      },
       "/notarize": {
         post: {
           operationId: "notarize", summary: "Notarize a SHA-256 fingerprint on Base",
@@ -190,7 +203,7 @@ export function uygulamaKur(ay) {
     },
     "x-discovery": { ownershipProofs: [] },
   }));
-  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/notarize"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
+  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/notarize", ay.publicUrl + "/lp-lock"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
 
   app.get("/", async (c) => {
     return json(c, {
@@ -199,6 +212,7 @@ export function uygulamaKur(ay) {
       description: "Prove a file or text existed at a point in time: its SHA-256 fingerprint is written to the AGIChainAI notary contract on Base. Pay per record in USDC over x402; no account, no API key, no AGI needed.",
       endpoints: {
         "POST /notarize": { price: typeof ay.price === "string" ? ay.price + " USDC" : ay.price, body: { hash: "0x + 64 hex chars (SHA-256 of your data)", label: "optional, up to ~50 characters" }, paid: "x402 (exact, USDC on Base)" },
+        "GET /lp-lock?token=0x…": { price: "$" + LP_USD + " USDC", description: "Liquidity-lock / rug-pull check for a Base token: burned, locked (with unlock dates) and removable LP share per pool", paid: "x402 (exact, USDC on Base)" },
         "GET /record/{hash}": { price: "free", description: "Check whether and when a fingerprint was recorded" },
         "GET /status": { price: "free" },
       },
@@ -312,6 +326,85 @@ export function uygulamaKur(ay) {
         hash: ozet, payment: { payer: odeyen, transaction: tahsil.transaction },
       }, 500, odemeBasligi);
     }
+  });
+
+  // ───────── Likidite kilidi kontrolü (GET /lp-lock?token=0x…) ─────────
+  const LP_FIYAT = ay.lpPrice || "$0.01";
+  const LP_USD = typeof LP_FIYAT === "string" ? LP_FIYAT.replace("$", "") : (Number(LP_FIYAT.amount) / 1e6).toFixed(2);
+  const LP_GIRDI_SEMA = { type: "object", required: ["token"], properties: { token: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$", description: "ERC-20 token address on Base" } } };
+  const LP_ORNEK = { token: { symbol: "XYZ" }, verdict: "MOSTLY_LOCKED", protectedPctWeightedByLiquidity: 91.2, v2Pools: [{ dex: "uniswap-v2", quote: "WETH", liquidityUsd: 48210.5, lp: { burnedPct: 0.0, lockedPct: 91.2, lockers: [{ name: "UNCX (Uniswap V2)", pct: 91.2, earliestUnlock: "2027-03-01T00:00:00.000Z" }], removablePct: 8.8 } }], v3Pools: [], notes: [] };
+  const lpBazaar = declareDiscoveryExtension({ method: "GET", input: { token: "0x4200000000000000000000000000000000000006" }, inputSchema: LP_GIRDI_SEMA, output: { example: LP_ORNEK } });
+  const lpKaynak = () => ({
+    url: ay.publicUrl + "/lp-lock",
+    description: "Is this Base token's liquidity really locked? One call checks every V2-style pool (Uniswap V2, Aerodrome, AGIChainAI) against WETH and USDC. It returns the share of LP burned, the share in known lockers (UNCX, Team Finance and others) with unlock dates, the share still removable, Aerodrome gauge staking, pool liquidity in USD, a rug-pull verdict and any V3 pools. Live on-chain reads, $0.01 USDC, no API key. Nothing is charged for an invalid token.",
+    mimeType: "application/json", serviceName: "AGIChainAI LP Lock Check",
+    tags: ["rug-pull", "liquidity-lock", "token-safety", "base", "lp", "due-diligence"],
+    iconUrl: "https://agichainai.com/assets/agi-token-256.png",
+  });
+
+  // Gelirin yarısıyla AGI yak: hizmet cüzdanında biriken USDC, yedek (0,05) üstü 0,15'i geçince yarısı Uniswap'ta AGI alıp 0x…dEaD'e gönderir.
+  let yakiyor = false;
+  const yakmaDene = async () => {
+    if (yakiyor || !A.router02) return; yakiyor = true;
+    try {
+      const bakiye = await okur.readContract({ address: A.usdc, abi: ERC20_ABI, functionName: "balanceOf", args: [hesap.address] });
+      const YEDEK = 50_000n, ESIK = 150_000n;
+      if (bakiye < ESIK) return;
+      const miktar = (bakiye - YEDEK) / 2n;
+      const izin = await okur.readContract({ address: A.usdc, abi: ERC20_ABI, functionName: "allowance", args: [hesap.address, A.router02] });
+      if (izin < miktar) {
+        const h = await yazar.writeContract({ address: A.usdc, abi: ERC20_ABI, functionName: "approve", args: [A.router02, 5_000_000n] });
+        await okur.waitForTransactionReceipt({ hash: h });
+      }
+      const { result } = await okur.simulateContract({ address: A.quoter, abi: QUOTER_ABI, functionName: "quoteExactInputSingle", args: [{ tokenIn: A.usdc, tokenOut: A.agi, amountIn: miktar, fee: 10000, sqrtPriceLimitX96: 0n }] });
+      const { request } = await okur.simulateContract({ account: hesap, address: A.router02, abi: ROUTER02_ABI, functionName: "exactInputSingle", args: [{ tokenIn: A.usdc, tokenOut: A.agi, fee: 10000, recipient: YAKMA_ADRESI, amountIn: miktar, amountOutMinimum: (result[0] * 95n) / 100n, sqrtPriceLimitX96: 0n }] });
+      const tx = await yazar.writeContract(request);
+      await okur.waitForTransactionReceipt({ hash: tx });
+      console.log("BURN", JSON.stringify({ usdc: formatUnits(miktar, 6), tx }));
+    } catch (e) { console.error("BURN_FAILED", String(e.shortMessage || e.message || e)); }
+    finally { yakiyor = false; }
+  };
+
+  app.get("/lp-lock", async (c) => {
+    const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
+    await hazirla();
+    const kaynak = lpKaynak();
+    const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: LP_FIYAT, network: ay.network, maxTimeoutSeconds: 120 });
+    const odemeIste = async (hata) => {
+      const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, lpBazaar);
+      return json(c, pr, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) });
+    };
+    const token = String(c.req.query("token") || "");
+    const gecerli = /^0x[0-9a-fA-F]{40}$/.test(token);
+    if (!baslik) return odemeIste(gecerli ? undefined : "add ?token=0x… (ERC-20 address on Base)");
+    if (!gecerli) return json(c, { error: "token must be a 0x-prefixed 20-byte address" }, 400);
+
+    // Analiz ÖDEMEDEN ÖNCE yapılır: geçersiz token ya da okuma hatası ücretlendirilmez.
+    let analiz;
+    try { analiz = await lpKilitAnalizi(okur, ay.lp, token); }
+    catch (e) {
+      if (e.kullanici) return json(c, { error: e.message + "; nothing was charged." }, 400);
+      console.error("LPLOCK_FAILED", String(e.shortMessage || e.message || e));
+      return json(c, { error: "Could not read the chain right now; nothing was charged." }, 503);
+    }
+
+    let yuk;
+    try { yuk = decodePaymentSignatureHeader(baslik); } catch { return odemeIste("invalid payment header"); }
+    const sart = sartlar.find((x) => x.scheme === yuk.accepted?.scheme && x.network === yuk.accepted?.network) || sartlar[0];
+    let dog;
+    try { dog = await sunucu.verifyPayment(yuk, sart, lpBazaar); } catch (e) { return odemeIste("verification failed: " + (e.message || e)); }
+    if (!dog.isValid) return odemeIste(dog.invalidReason || "payment invalid");
+    try {
+      const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, undefined, lpBazaar);
+      yuk.extensions = { ...(pr.extensions || {}), ...(yuk.extensions || {}) };
+      if (!yuk.resource) yuk.resource = pr.resource;
+    } catch {}
+    let tahsil;
+    try { tahsil = await sunucu.settlePayment(yuk, sart, lpBazaar); } catch (e) { return odemeIste("settlement failed: " + (e.message || e)); }
+    if (!tahsil.success) return odemeIste(tahsil.errorReason || "settlement failed");
+    console.log("SETTLED_LP", JSON.stringify({ tx: tahsil.transaction, token }));
+    try { c.executionCtx.waitUntil(yakmaDene()); } catch { yakmaDene(); }
+    return json(c, { ...analiz, payment: { payer: tahsil.payer || dog.payer, transaction: tahsil.transaction, network: tahsil.network }, feeUse: "Half of accumulated fees buy AGI on Uniswap and burn it." }, 200, { "PAYMENT-RESPONSE": encodePaymentResponseHeader(tahsil) });
   });
 
   app.notFound((c) => json(c, { error: "not found", see: ay.publicUrl + "/" }, 404));
