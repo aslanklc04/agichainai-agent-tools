@@ -1,0 +1,22 @@
+{
+  "name": "agichainai-x402-notary",
+  "private": true,
+  "type": "module",
+  "description": "AGIChainAI notary as an x402 pay-per-call service on Cloudflare Workers",
+  "scripts": {
+    "test": "node test/e2e.mjs",
+    "build": "wrangler deploy --dry-run --minify --outdir dist"
+  },
+  "dependencies": {
+    "@x402/core": "^2.32.0",
+    "@x402/evm": "^2.32.0",
+    "@x402/hono": "^2.32.0",
+    "hono": "^4.13.21",
+    "viem": "^2.58.6"
+  },
+  "devDependencies": {
+    "@x402/fetch": "^2.32.0",
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.168.0"
+  }
+}

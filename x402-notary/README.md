@@ -1,0 +1,31 @@
+# AGIChainAI x402 Notary
+
+A pay-per-call notary for AI agents. An agent sends the SHA-256 fingerprint of a file or report and pays **$0.02 USDC on Base over [x402](https://x402.org)**. No account, API key, wallet setup or AGI is needed. The fingerprint is written to the verified [AGIChainAI USDC notary](https://basescan.org/address/0x722CC9E982008e55612fB86E184B1730ec9a26Cc). That contract uses its 0.01 USDC fee to buy AGI on Uniswap and burn it.
+
+## Endpoints
+
+| Method | Path | Price | |
+|---|---|---|---|
+| POST | `/notarize` | $0.02 USDC (x402 `exact`, Base) | body `{"hash":"0x…64 hex","label":"optional, ≤50 ASCII chars"}` |
+| GET | `/record/{hash}` | free | whether and when a fingerprint was recorded (checks both AGIChainAI notaries) |
+| GET | `/status` | free | service wallet balances, record count |
+| GET | `/` | free | description |
+
+```js
+import { wrapFetchWithPaymentFromConfig } from "@x402/fetch";
+import { ExactEvmScheme } from "@x402/evm";
+const pay = wrapFetchWithPaymentFromConfig(fetch, { schemes: [{ network: "eip155:8453", client: new ExactEvmScheme(account) }] });
+const r = await pay(URL + "/notarize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hash }) });
+```
+
+## Guarantees
+
+- **Nothing is charged unless the record can be written.** Bad input (400), an already-recorded hash (409) and a service that cannot record right now (503) all return before payment. The service also simulates the on-chain write before it settles the payment.
+- **The payment is settled before the work is done**, so unpaid or unsettleable payments never cause a write.
+- Only the fingerprint goes on-chain, never the content. The record's label shows `x402:<payer address>`.
+
+## Run and deploy
+
+- `npm test`: end-to-end test against a local Hardhat chain, with a real x402 client and a local facilitator (13 checks).
+- `npm run build`: bundles the worker to `dist/`. `dist/worker.js` is the bundle deployed on Cloudflare.
+- Secret: `SERVICE_PRIVATE_KEY`, a dedicated low-balance service wallet holding a little ETH for gas and USDC for the notary fee. Settlement uses the PayAI facilitator (`FACILITATOR_URL`).

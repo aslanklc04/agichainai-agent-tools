@@ -1,0 +1,8 @@
+name = "agichainai-notary"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+FACILITATOR_URL = "https://facilitator.payai.network"
+PRICE = "$0.02"
