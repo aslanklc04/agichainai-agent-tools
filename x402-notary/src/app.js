@@ -12,7 +12,7 @@ import { createPublicClient, createWalletClient, http, fallback, getAddress, isH
 import { privateKeyToAccount } from "viem/accounts";
 import { lpKilitAnalizi } from "./lplock.js";
 
-export const SURUM = "1.3.1";
+export const SURUM = "1.3.2";
 
 const NOTER_USDC_ABI = parseAbi([
   "function kaydet(bytes32 ozet, string etiket, uint256 asgariAgi) returns (uint256)",
@@ -148,10 +148,9 @@ export function uygulamaKur(ay) {
     await okur.simulateContract(kayitArg);
     // Gaz parası gerçekten yetiyor mu? (tahmin × en yüksek ücret × 1,5 güvenlik payı)
     // (bakiye geçersiz kılınıyorsa her düğüm gaz tahmininde bunu desteklemez; o durumda cömert sabit 400k gaz kullanılır)
-    const [gaz, ucretler, eth] = await Promise.all([
-      gecersizKil ? 400_000n : okur.estimateContractGas(kayitArg),
-      okur.estimateFeesPerGas(), okur.getBalance({ address: hesap.address }),
-    ]);
+    // Gaz tahmini (eth_estimateGas) genel RPC'lerde en sık reddedilen çağrı: kayıt ~250k gaz harcar, 400k sabit pay kullanılır.
+    const gaz = 400_000n;
+    const [ucretler, eth] = await Promise.all([okur.estimateFeesPerGas(), okur.getBalance({ address: hesap.address })]);
     const gerekli = (gaz * (ucretler.maxFeePerGas ?? ucretler.gasPrice) * 3n) / 2n;
     if (eth < gerekli) throw new Error(`low gas balance: need ${formatEther(gerekli)} ETH`);
     return { asgari };
