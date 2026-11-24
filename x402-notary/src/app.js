@@ -64,9 +64,10 @@ export function uygulamaKur(ay) {
   // Genel RPC'ler hız sınırı koyabilir: birkaç adres arasında otomatik geçiş ve yeniden deneme.
   const rpcler = (Array.isArray(ay.rpcUrl) ? ay.rpcUrl : [ay.rpcUrl]).filter(Boolean);
   const tasima = rpcler.length > 1
-    ? fallback(rpcler.map((u) => http(u, { retryCount: 0, timeout: 4_000 })), { rank: { interval: 60_000, sampleCount: 5, timeout: 2_000 }, retryCount: 1 })
-    : http(rpcler[0], { retryCount: 3, timeout: 10_000 });
-  const okur = createPublicClient({ chain: ay.chain, transport: tasima });
+    ? fallback(rpcler.map((u) => http(u, { retryCount: 1, retryDelay: 300, timeout: 4_000, batch: { wait: 10 } })), { rank: { interval: 60_000, sampleCount: 5, timeout: 2_000 }, retryCount: 2, retryDelay: 400 })
+    : http(rpcler[0], { retryCount: 3, timeout: 10_000, batch: { wait: 10 } });
+  // Aynı anda yapılan okumalar tek RPC isteğinde toplanır (multicall) — hız sınırına takılma azalır.
+  const okur = createPublicClient({ chain: ay.chain, transport: tasima, batch: { multicall: { wait: 10 } } });
   const yazar = createWalletClient({ account: hesap, chain: ay.chain, transport: tasima });
   const A = Object.fromEntries(Object.entries(ay.adres).map(([k, v]) => [k, getAddress(v)]));
   const sunucu = new x402ResourceServer(ay.facilitator).register(ay.network, new ExactEvmScheme());
