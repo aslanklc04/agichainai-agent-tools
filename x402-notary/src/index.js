@@ -1,6 +1,7 @@
 // Cloudflare Workers girişi. Gizli değişken: SERVICE_PRIVATE_KEY (yalnızca küçük bakiyeli hizmet cüzdanı).
 import { base } from "viem/chains";
 import { HTTPFacilitatorClient } from "@x402/core/server";
+import { createFacilitatorConfig } from "@coinbase/x402";
 import { uygulamaKur } from "./app.js";
 
 const BASE = {
@@ -26,7 +27,11 @@ function kur(env, url) {
       "https://base.llamarpc.com",
     ]),
     privateKey: env.SERVICE_PRIVATE_KEY.startsWith("0x") ? env.SERVICE_PRIVATE_KEY : "0x" + env.SERVICE_PRIVATE_KEY,
-    facilitator: new HTTPFacilitatorClient({ url: env.FACILITATOR_URL || "https://facilitator.payai.network" }),
+    // Coinbase (CDP) anahtarları girilmişse Coinbase'in ödeme onayı kullanılır (Bazaar kataloğuna giriş bunu ister); yoksa PayAI.
+    facilitator: env.CDP_API_KEY_ID && env.CDP_API_KEY_SECRET
+      ? new HTTPFacilitatorClient(createFacilitatorConfig(env.CDP_API_KEY_ID, env.CDP_API_KEY_SECRET))
+      : new HTTPFacilitatorClient({ url: env.FACILITATOR_URL || "https://facilitator.payai.network" }),
+    facilitatorName: env.CDP_API_KEY_ID && env.CDP_API_KEY_SECRET ? "coinbase-cdp" : "payai",
     price: env.PRICE || "$0.02",
     adres: BASE,
     publicUrl: env.PUBLIC_URL || new URL(url).origin,

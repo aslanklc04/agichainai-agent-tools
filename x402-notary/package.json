@@ -8,6 +8,7 @@
     "build": "wrangler deploy --dry-run --minify --outdir dist"
   },
   "dependencies": {
+    "@coinbase/x402": "^2.1.0",
     "@x402/core": "^2.32.0",
     "@x402/evm": "^2.32.0",
     "@x402/extensions": "^2.32.0",

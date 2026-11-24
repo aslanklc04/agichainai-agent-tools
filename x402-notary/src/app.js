@@ -10,7 +10,7 @@ import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/
 import { createPublicClient, createWalletClient, http, fallback, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-export const SURUM = "1.0.0";
+export const SURUM = "1.1.0";
 
 const NOTER_USDC_ABI = parseAbi([
   "function kaydet(bytes32 ozet, string etiket, uint256 asgariAgi) returns (uint256)",
@@ -209,7 +209,7 @@ export function uygulamaKur(ay) {
       okur.readContract({ address: A.noterUsdc, abi: NOTER_USDC_ABI, functionName: "toplamYakilan" }),
     ]);
     return json(c, {
-      ok: eth >= ASGARI_ETH, serviceWallet: hesap.address, version: SURUM,
+      ok: eth >= ASGARI_ETH, serviceWallet: hesap.address, version: SURUM, facilitator: ay.facilitatorName || "custom",
       notaryRecords: Number(sayi), agiBurnedByNotary: formatEther(yak),
       serviceWalletEth: formatEther(eth), serviceWalletUsdc: formatUnits(usdc, 6),
     });
@@ -263,10 +263,10 @@ export function uygulamaKur(ay) {
 
     // 3) Doğrula, sonra TAHSİL ET; ancak tahsilattan sonra zincire yazılır.
     let dog;
-    try { dog = await sunucu.verifyPayment(yuk, sart); } catch (e) { return odemeIste("verification failed: " + (e.message || e)); }
+    try { dog = await sunucu.verifyPayment(yuk, sart, bazaar); } catch (e) { return odemeIste("verification failed: " + (e.message || e)); }
     if (!dog.isValid) return odemeIste(dog.invalidReason || "payment invalid");
     let tahsil;
-    try { tahsil = await sunucu.settlePayment(yuk, sart); } catch (e) { return odemeIste("settlement failed: " + (e.message || e)); }
+    try { tahsil = await sunucu.settlePayment(yuk, sart, bazaar); } catch (e) { return odemeIste("settlement failed: " + (e.message || e)); }
     if (!tahsil.success) return odemeIste(tahsil.errorReason || "settlement failed");
     const odemeBasligi = { "PAYMENT-RESPONSE": encodePaymentResponseHeader(tahsil) };
     const odeyen = getAddress(tahsil.payer || dog.payer || yuk.payload?.authorization?.from);
