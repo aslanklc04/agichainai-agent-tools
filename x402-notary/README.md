@@ -7,6 +7,7 @@ A pay-per-call notary for AI agents. An agent sends the SHA-256 fingerprint of a
 | Method | Path | Price | |
 |---|---|---|---|
 | POST | `/notarize` | $0.02 USDC (x402 `exact`, Base) | body `{"hash":"0x…64 hex","label":"optional, ≤50 ASCII chars"}` |
+| GET | `/lp-lock?token=0x…` | $0.01 USDC (x402 `exact`, Base) | Is a Base token's liquidity locked? Returns burned / locked (UNCX, Team Finance, AGIChainAI lock, with unlock dates) / removable LP share for Uniswap V2, Aerodrome and AGIChainAI pools, Aerodrome gauge staking, USD liquidity, V3 pools, a `verdict` and a `rugRisk`. Nothing is charged for an invalid token. Half of the accumulated fees buy and burn AGI. |
 | GET | `/record/{hash}` | free | whether and when a fingerprint was recorded (checks both AGIChainAI notaries) |
 | GET | `/status` | free | service wallet balances, record count |
 | GET | `/` | free | description |
