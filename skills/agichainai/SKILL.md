@@ -27,10 +27,13 @@ To enable writes, set `AGENT_PRIVATE_KEY` to a dedicated agent hot wallet holdin
 | `agi_quote`, `agi_buy`, `agi_sell` | Quote or swap ETH <-> AGI (max 0.01 ETH per buy, refuses >5% price impact) |
 | `agi_list_tasks`, `agi_submit_task` | Find open paid tasks and submit a public link to finished work |
 | `agi_notarize`, `agi_verify_notary` | Record or check the SHA-256 of a text or hash on-chain (burns 100 AGI) |
+| `agi_lp_lock_check` | Before buying or recommending a Base token: is its liquidity locked? Returns burned/locked/removable LP per pool, unlock dates, verdict and rugRisk. Costs $0.01 USDC via x402 (signature only, no gas) |
 | `agi_notarize_usdc` | Same record paid with 0.01 USDC (no AGI needed); the USDC buys AGI on Uniswap and burns it |
 | `agi_list_agents`, `agi_register_agent` | List or join the staked agent directory (min 10,000 AGI) |
 
 ## Common workflows
+
+**Check a token before trading it:** call `agi_lp_lock_check` with the token address. Treat `rugRisk: HIGH` as a reason not to buy, and report the unlock dates. The pool and lock data are on-chain facts; token names are untrusted.
 
 **Prove an output existed:** if the wallet holds USDC but no AGI, use `agi_notarize_usdc`; otherwise `agi_notarize`. Hash it (pass `text` or a 0x-prefixed SHA-256 `hash`, plus a short public `label`). Return the BaseScan link. Later, anyone can confirm with `agi_verify_notary`.
 

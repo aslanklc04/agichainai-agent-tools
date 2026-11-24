@@ -21,6 +21,7 @@ export const BASE_MAINNET = {
   directory: "0xF934bB0D18902A753Ad47FC57D0BE107b904c3FE",
   ethUsdFeed: "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
   site: "https://agichainai.com/exchange/",
+  x402Base: "https://agichainai-notary.aslanklc04.workers.dev",
 };
 
 export const DEFAULT_LIMITS = {
@@ -28,6 +29,7 @@ export const DEFAULT_LIMITS = {
   maxAgiPerTx: "1000000",      // largest AGI amount one sell / stake / approval may move
   maxSlippageBps: 300,         // 3% default slippage tolerance
   maxPriceImpactBps: 500,      // refuse trades that move the pool price more than 5%
+  maxX402Usd: "0.05",          // largest USDC amount one x402 call may pay
 };
 
 const ERC20 = parseAbi([
@@ -93,6 +95,8 @@ function safeUrl(s) {
  * @param {(p: {address:string, abi:any, functionName:string, args?:any[]}) => Promise<any>} o.read   contract reader
  * @param {(tx: {to:string, data:string, value?:bigint}) => Promise<{hash:string, status:string}>} [o.send] signer; omit for read-only
  * @param {() => Promise<string>} [o.account]   address of the agent's wallet
+ * @param {(td: {domain:any, types:any, primaryType:string, message:any}) => Promise<string>} [o.signTypedData] EIP-712 signer for x402 payments
+ * @param {typeof fetch} [o.fetch] HTTP client (tests only)
  * @param {object} [o.addresses]  override (tests only)
  * @param {object} [o.limits]
  */
@@ -313,6 +317,35 @@ export function createAgiTools(o) {
         const k = await findRecord(h);
         if (!k) return { hash: h, recorded: false };
         return { hash: h, recorded: true, by: k.kaydeden, time: new Date(Number(k.zaman) * 1000).toISOString(), block: Number(k.blok), paidWith: k.via, label_untrusted: k.etiket };
+      },
+    },
+    {
+      name: "agi_lp_lock_check",
+      description: "Rug-pull check for a Base token: is its liquidity locked? For every Uniswap V2, Aerodrome and AGIChainAI pool it returns the LP share burned, the share in known lockers (UNCX, Team Finance, AGIChainAI lock, with unlock dates) and the share still removable, plus Aerodrome gauge staking, USD liquidity, V3 pools, a verdict and a rugRisk. Paid per call: $0.01 USDC on Base over x402, signed by this agent's wallet (no gas). Refuses to pay more than the configured limit. Nothing is charged for an invalid token.",
+      schema: z.object({ token: z.string().describe("ERC-20 token address on Base (0x…)") }),
+      async run({ token }) {
+        if (!/^0x[0-9a-fA-F]{40}$/.test(token)) throw new Error("token must be a 0x-prefixed 20-byte address");
+        if (!o.signTypedData) throw new Error("This paid action needs a wallet that can sign typed data (EIP-712). Configure a signer for the agent first.");
+        const who = await me();
+        const url = `${A.x402Base}/lp-lock?token=${token}`;
+        const f = o.fetch || fetch;
+        // 1) ask the price first and enforce the limit before signing anything
+        const probe = await f(url);
+        if (probe.status !== 402) throw new Error(`Unexpected response ${probe.status} from the lock-check service`);
+        const pr = await probe.json();
+        const req = (pr.accepts || []).find((x) => x.scheme === "exact" && x.network === "eip155:" + A.chainId && getAddress(x.asset) === getAddress(A.usdc));
+        if (!req) throw new Error("The service did not offer a USDC payment on Base");
+        const maxRaw = parseUnits(String(L.maxX402Usd), 6);
+        if (BigInt(req.amount) > maxRaw) throw new Error(`The service asks ${formatUnits(BigInt(req.amount), 6)} USDC, above this agent's x402 limit of ${L.maxX402Usd} USDC`);
+        // 2) pay with an EIP-3009 authorization (gasless) and fetch the result
+        const { wrapFetchWithPaymentFromConfig } = await import("@x402/fetch");
+        const { ExactEvmScheme } = await import("@x402/evm/exact/client");
+        const signer = { address: who, signTypedData: (td) => o.signTypedData(td) };
+        const pay = wrapFetchWithPaymentFromConfig(f, { schemes: [{ network: "eip155:" + A.chainId, client: new ExactEvmScheme(signer) }], ...(o.x402Options || {}) });
+        const r = await pay(url);
+        const j = await r.json();
+        if (r.status !== 200) throw new Error((j.error || "Lock check failed") + ` (HTTP ${r.status})`);
+        return { ...j, paidUsdc: formatUnits(BigInt(req.amount), 6), page: A.site + "lp-lock.html" };
       },
     },
     {

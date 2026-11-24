@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // MCP server (stdio): lets Claude, Cursor or any MCP client use AGI on Base.
 // Env: AGI_RPC_URL (optional), AGENT_PRIVATE_KEY (optional; read-only without it),
-//      AGI_MAX_ETH_PER_SWAP, AGI_MAX_AGI_PER_TX (optional limits)
+//      AGI_MAX_ETH_PER_SWAP, AGI_MAX_AGI_PER_TX, AGI_MAX_X402_USD (optional limits)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createViemAgiTools } from "./viem.js";
@@ -25,6 +25,7 @@ if (isMain) {
   const limits = {};
   if (process.env.AGI_MAX_ETH_PER_SWAP) limits.maxEthPerSwap = process.env.AGI_MAX_ETH_PER_SWAP;
   if (process.env.AGI_MAX_AGI_PER_TX) limits.maxAgiPerTx = process.env.AGI_MAX_AGI_PER_TX;
+  if (process.env.AGI_MAX_X402_USD) limits.maxX402Usd = process.env.AGI_MAX_X402_USD;
   const tools = createViemAgiTools({ rpcUrl: process.env.AGI_RPC_URL, privateKey: process.env.AGENT_PRIVATE_KEY || undefined, limits });
   await buildServer(tools).connect(new StdioServerTransport());
 }

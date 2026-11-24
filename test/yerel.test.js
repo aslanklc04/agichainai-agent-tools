@@ -148,7 +148,7 @@ test("MCP server lists and calls tools", async () => {
   const client = new Client({ name: "t", version: "1" });
   await client.connect(b);
   const list = await client.listTools();
-  assert.equal(list.tools.length, 12);
+  assert.equal(list.tools.length, 13);
   const r = await client.callTool({ name: "agi_market_info", arguments: {} });
   assert.ok(JSON.parse(r.content[0].text).priceEth > 0);
   const e = await client.callTool({ name: "agi_buy", arguments: { ethAmount: "0.001" } });
@@ -161,7 +161,7 @@ test("AgentKit action provider works with a viem wallet provider", async () => {
   const wp = new ViemWalletProvider(wc);
   const p = agiActionProvider({ addresses: A });
   const actions = p.getActions(wp);
-  assert.equal(actions.length, 12);
+  assert.equal(actions.length, 13);
   const info = actions.find((x) => x.name.endsWith("agi_market_info"));
   const out = JSON.parse(await info.invoke({}));
   assert.ok(out.priceEth > 0);

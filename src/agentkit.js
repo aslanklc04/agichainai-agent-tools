@@ -17,6 +17,7 @@ export function agiActionProvider({ limits, addresses } = {}) {
       read: (p) => wp.readContract(p),
       getEthBalance: wp.getAddress ? async (a) => (a.toLowerCase() === wp.getAddress().toLowerCase() ? wp.getBalance() : undefined) : undefined,
       account: async () => wp.getAddress(),
+      signTypedData: wp.signTypedData ? (td) => wp.signTypedData(td) : undefined,
       send: async (tx) => {
         const hash = await wp.sendTransaction({ to: tx.to, data: tx.data, value: tx.value ?? 0n });
         const r = await wp.waitForTransactionReceipt(hash);

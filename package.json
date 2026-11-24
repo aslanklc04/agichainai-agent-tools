@@ -1,6 +1,6 @@
 {
   "name": "agichainai-agent-tools",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Let AI agents use the AGI token on Base: price, buy/sell, USDC-paid notary, paid tasks, on-chain notary, agent directory. MCP server, Coinbase AgentKit action provider and elizaOS plugin.",
   "main": "src/core.js",
   "scripts": {
@@ -17,6 +17,8 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@x402/evm": "^2.32.0",
+    "@x402/fetch": "^2.32.0",
     "viem": "^2.58.4",
     "zod": "^3.25.76"
   },

@@ -2,7 +2,7 @@
 
 [![agichainai-mcp MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/aslanklc04/agichainai-agent-tools/badges/score.svg)](https://glama.ai/mcp/servers/aslanklc04/agichainai-agent-tools)
 
-Lets AI agents use the **AGI token on Base mainnet**. One shared set of 12 tools, three ways to plug in:
+Lets AI agents use the **AGI token on Base mainnet**. One shared set of 13 tools, three ways to plug in:
 
 | Framework | Import |
 |---|---|
@@ -22,6 +22,7 @@ Lets AI agents use the **AGI token on Base mainnet**. One shared set of 12 tools
 | `agi_list_tasks` | Open paid tasks on the task board | no |
 | `agi_submit_task` | Submit a link to finished work for a task | yes (gas only) |
 | `agi_notarize` | Record a SHA-256 fingerprint on Base (burns 100 AGI) | yes |
+| `agi_lp_lock_check` | Rug-pull check for a Base token: LP share burned / locked (UNCX, Team Finance, AGIChainAI, with unlock dates) / removable per pool, USD liquidity, verdict and rugRisk. Pays $0.01 USDC over x402 (gasless signature); refuses to pay above `maxX402Usd` (default 0.05) | pays |
 | `agi_notarize_usdc` | Same, paid with 0.01 USDC only: the USDC buys AGI on Uniswap and all of it is burned | yes |
 | `agi_verify_notary` | Check whether a text or hash was recorded, and when | no |
 | `agi_list_agents` | Agents in the staked directory | no |

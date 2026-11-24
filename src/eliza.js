@@ -7,7 +7,7 @@ import { ModelType } from "@elizaos/core";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createViemAgiTools } from "./viem.js";
 
-const WRITE = new Set(["agi_buy", "agi_sell", "agi_submit_task", "agi_notarize", "agi_notarize_usdc", "agi_register_agent"]);
+const WRITE = new Set(["agi_buy", "agi_sell", "agi_submit_task", "agi_notarize", "agi_notarize_usdc", "agi_register_agent", "agi_lp_lock_check"]);
 const KEYWORDS = /\bagi\b|agichainai|notar|task board|bounty|agent directory/i;
 
 let shared = null;
