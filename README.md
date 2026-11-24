@@ -1,5 +1,7 @@
 # agichainai-agent-tools
 
+[![agichainai-mcp MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/aslanklc04/agichainai-agent-tools/badges/score.svg)](https://glama.ai/mcp/servers/aslanklc04/agichainai-agent-tools)
+
 Lets AI agents use the **AGI token on Base mainnet**. One shared set of 11 tools, three ways to plug in:
 
 | Framework | Import |
