@@ -11,7 +11,7 @@ import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/
 import { createPublicClient, createWalletClient, http, fallback, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-export const SURUM = "1.2.0";
+export const SURUM = "1.2.1";
 
 const NOTER_USDC_ABI = parseAbi([
   "function kaydet(bytes32 ozet, string etiket, uint256 asgariAgi) returns (uint256)",
@@ -235,7 +235,14 @@ export function uygulamaKur(ay) {
   app.post("/notarize", async (c) => {
     const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
     await hazirla();
-    const kaynak = { url: ay.publicUrl + "/notarize", description: "Record a SHA-256 fingerprint on Base (AGIChainAI notary). Part of the fee buys and burns AGI.", mimeType: "application/json", serviceName: "AGIChainAI Notary" };
+    const kaynak = {
+      url: ay.publicUrl + "/notarize",
+      description: "Notarize any file, report, dataset or AI agent output on Base: send only its SHA-256 hash (content never leaves you) and get an on-chain proof of existence and integrity with block, time and BaseScan tx, verifiable by anyone for free via GET /record/{hash}. $0.02 USDC, no account or API key. Nothing is charged for an already-recorded hash or if the write would fail. Part of the fee buys and burns AGI.",
+      mimeType: "application/json",
+      serviceName: "AGIChainAI Notary",
+      tags: ["notary", "notarize", "timestamp", "proof-of-existence", "sha256", "audit-trail"],
+      iconUrl: "https://agichainai.com/assets/agi-token-256.png",
+    };
     const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: ay.price, network: ay.network, maxTimeoutSeconds: 120 });
     const odemeIste = async (hata) => {
       const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, bazaar);
