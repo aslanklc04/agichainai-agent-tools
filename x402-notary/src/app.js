@@ -12,7 +12,7 @@ import { createPublicClient, createWalletClient, http, fallback, getAddress, isH
 import { privateKeyToAccount } from "viem/accounts";
 import { lpKilitAnalizi } from "./lplock.js";
 
-export const SURUM = "1.3.0";
+export const SURUM = "1.3.1";
 
 const NOTER_USDC_ABI = parseAbi([
   "function kaydet(bytes32 ozet, string etiket, uint256 asgariAgi) returns (uint256)",
@@ -70,7 +70,9 @@ export function uygulamaKur(ay) {
   // Genel RPC'ler hız sınırı koyabilir: birkaç adres arasında otomatik geçiş ve yeniden deneme.
   const rpcler = (Array.isArray(ay.rpcUrl) ? ay.rpcUrl : [ay.rpcUrl]).filter(Boolean);
   const tasima = rpcler.length > 1
-    ? fallback(rpcler.map((u) => http(u, { retryCount: 1, retryDelay: 300, timeout: 4_000, batch: { wait: 10 } })), { rank: { interval: 60_000, sampleCount: 5, timeout: 2_000 }, retryCount: 2, retryDelay: 400 })
+    // Not: Cloudflare Workers'ta bir isteğin başlattığı G/Ç'yi başka istek bekleyemez; bu yüzden arka planda ölçüm yapan "rank" kullanılmaz
+    // ve uygulama her istekte yeniden kurulur (bkz. index.js).
+    ? fallback(rpcler.map((u) => http(u, { retryCount: 1, retryDelay: 300, timeout: 4_000, batch: { wait: 10 } })), { rank: false, retryCount: 2, retryDelay: 400 })
     : http(rpcler[0], { retryCount: 3, timeout: 10_000, batch: { wait: 10 } });
   // Aynı anda yapılan okumalar tek RPC isteğinde toplanır (multicall) — hız sınırına takılma azalır.
   const okur = createPublicClient({ chain: ay.chain, transport: tasima, batch: { multicall: { wait: 10 } } });

@@ -14,9 +14,9 @@ const BASE = {
   router02: "0x2626664c2603336E57B271c5C0b26F421741e481",
 };
 
-let onbellek = null;
+// Her istek kendi istemcilerini kurar: Workers'ta istekler arası paylaşılan bekleyen G/Ç takılmaya yol açar.
 function kur(env, url) {
-  if (onbellek) return onbellek;
+  let onbellek;
   if (!env.SERVICE_PRIVATE_KEY) throw new Error("SERVICE_PRIVATE_KEY secret is not set");
   onbellek = uygulamaKur({
     chain: base,
