@@ -240,6 +240,7 @@ export function uygulamaKur(ay) {
   });
 
   app.notFound((c) => json(c, { error: "not found", see: ay.publicUrl + "/" }, 404));
-  app.onError((e, c) => { console.error(e); return json(c, { error: "internal error" }, 500); });
+  // Hata ayrıntısı herkese açık bilgiden ibarettir (anahtar asla mesajlarda yer almaz); ilk sürümde teşhis için döndürülür.
+  app.onError((e, c) => { console.error("ERR", e && (e.stack || e.message)); return json(c, { error: "internal error", detail: String((e && (e.shortMessage || e.message)) || e).slice(0, 300) }, 500); });
   return { app, hesap };
 }
