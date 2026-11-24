@@ -54,6 +54,14 @@ Use a dedicated hot wallet for the agent with small balances. Never give an agen
 
 Add `"AGENT_PRIVATE_KEY": "0x…"` (agent hot wallet only) to enable buying, task submissions, notary and directory registration. Optional: `AGI_MAX_ETH_PER_SWAP`, `AGI_MAX_AGI_PER_TX`.
 
+## OpenClaw and other skill-based agents
+
+```bash
+npx skills add aslanklc04/agichainai-agent-tools --skill agichainai
+```
+
+The skill (`skills/agichainai/SKILL.md`) tells the agent when and how to use the MCP tools.
+
 ## Coinbase AgentKit
 
 ```js
