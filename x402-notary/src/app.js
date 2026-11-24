@@ -64,7 +64,7 @@ export function uygulamaKur(ay) {
   // Genel RPC'ler hız sınırı koyabilir: birkaç adres arasında otomatik geçiş ve yeniden deneme.
   const rpcler = (Array.isArray(ay.rpcUrl) ? ay.rpcUrl : [ay.rpcUrl]).filter(Boolean);
   const tasima = rpcler.length > 1
-    ? fallback(rpcler.map((u) => http(u, { retryCount: 1, timeout: 10_000 })), { rank: false, retryCount: 2 })
+    ? fallback(rpcler.map((u) => http(u, { retryCount: 0, timeout: 4_000 })), { rank: { interval: 60_000, sampleCount: 5, timeout: 2_000 }, retryCount: 1 })
     : http(rpcler[0], { retryCount: 3, timeout: 10_000 });
   const okur = createPublicClient({ chain: ay.chain, transport: tasima });
   const yazar = createWalletClient({ account: hesap, chain: ay.chain, transport: tasima });
@@ -105,14 +105,19 @@ export function uygulamaKur(ay) {
     throw new Error("could not locate USDC balance slot");
   };
 
+  let sabitler = null;
   // İzin yoksa verir, fiyat teklifi alır ve kaydı simüle eder; kayma payı %5.
   const zincirHazirla = async (ozet, etiketHam) => {
-    const [ucret, havuz, izin] = await Promise.all([
+    // UCRET ve HAVUZ_UCRETI değişmez (immutable): bir kez okunur.
+    sabitler ??= await Promise.all([
       okur.readContract({ address: A.noterUsdc, abi: NOTER_USDC_ABI, functionName: "UCRET" }),
       okur.readContract({ address: A.noterUsdc, abi: NOTER_USDC_ABI, functionName: "HAVUZ_UCRETI" }),
+    ]).catch((e) => { sabitler = null; throw e; });
+    const [ucret, havuz] = sabitler;
+    const [izin, bakiye] = await Promise.all([
       okur.readContract({ address: A.usdc, abi: ERC20_ABI, functionName: "allowance", args: [hesap.address, A.noterUsdc] }),
+      okur.readContract({ address: A.usdc, abi: ERC20_ABI, functionName: "balanceOf", args: [hesap.address] }),
     ]);
-    const bakiye = await okur.readContract({ address: A.usdc, abi: ERC20_ABI, functionName: "balanceOf", args: [hesap.address] });
     // Cüzdanda henüz USDC yoksa sorun değil: ödeme (fiyat ≥ noter ücreti) yazmadan önce tahsil edilir.
     // Simülasyonda bu gelecek bakiye, USDC'nin bakiye slotu geçersiz kılınarak (state override) gösterilir.
     let gecersizKil;
@@ -239,10 +244,9 @@ export function uygulamaKur(ay) {
       return json(c, { error: !ozetGecerli ? "hash must be 0x followed by 64 hex characters (SHA-256)" : "label: up to 50 plain ASCII characters" }, 400);
     }
 
-    const onceki = await kayitBul(ozet);
+    const [onceki, eth] = await Promise.all([kayitBul(ozet), okur.getBalance({ address: hesap.address })]);
     if (onceki) return json(c, { error: "This hash is already recorded; nothing was charged.", record: onceki }, 409);
 
-    const eth = await okur.getBalance({ address: hesap.address });
     if (eth < ASGARI_ETH) return json(c, { error: "Service temporarily unavailable (low gas balance); nothing was charged." }, 503);
 
     // 2) Zincir tarafı ÖN KONTROL — ödeme alınmadan önce: izin, fiyat teklifi, kayıt simülasyonu ve gaz.
