@@ -18,7 +18,13 @@ function kur(env, url) {
   onbellek = uygulamaKur({
     chain: base,
     network: "eip155:8453",
-    rpcUrl: env.RPC_URL || "https://mainnet.base.org",
+    rpcUrl: (env.RPC_URL ? [env.RPC_URL] : []).concat([
+      "https://base-rpc.publicnode.com",
+      "https://base.drpc.org",
+      "https://mainnet.base.org",
+      "https://1rpc.io/base",
+      "https://base.llamarpc.com",
+    ]),
     privateKey: env.SERVICE_PRIVATE_KEY.startsWith("0x") ? env.SERVICE_PRIVATE_KEY : "0x" + env.SERVICE_PRIVATE_KEY,
     facilitator: new HTTPFacilitatorClient({ url: env.FACILITATOR_URL || "https://facilitator.payai.network" }),
     price: env.PRICE || "$0.02",

@@ -7,7 +7,7 @@ import {
 } from "@x402/core/http";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/extensions/bazaar";
-import { createPublicClient, createWalletClient, http, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
+import { createPublicClient, createWalletClient, http, fallback, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 export const SURUM = "1.0.0";
@@ -61,8 +61,13 @@ export function uygulamaKur(ay) {
   const hesap = privateKeyToAccount(ay.privateKey);
   // Fiyat USDC'nin en küçük biriminde (6 ondalık): "$0.02" → 20000
   ay.fiyatHam = typeof ay.price === "string" ? BigInt(Math.round(Number(ay.price.replace("$", "")) * 1e6)) : BigInt(ay.price.amount);
-  const okur = createPublicClient({ chain: ay.chain, transport: http(ay.rpcUrl) });
-  const yazar = createWalletClient({ account: hesap, chain: ay.chain, transport: http(ay.rpcUrl) });
+  // Genel RPC'ler hız sınırı koyabilir: birkaç adres arasında otomatik geçiş ve yeniden deneme.
+  const rpcler = (Array.isArray(ay.rpcUrl) ? ay.rpcUrl : [ay.rpcUrl]).filter(Boolean);
+  const tasima = rpcler.length > 1
+    ? fallback(rpcler.map((u) => http(u, { retryCount: 1, timeout: 10_000 })), { rank: false, retryCount: 2 })
+    : http(rpcler[0], { retryCount: 3, timeout: 10_000 });
+  const okur = createPublicClient({ chain: ay.chain, transport: tasima });
+  const yazar = createWalletClient({ account: hesap, chain: ay.chain, transport: tasima });
   const A = Object.fromEntries(Object.entries(ay.adres).map(([k, v]) => [k, getAddress(v)]));
   const sunucu = new x402ResourceServer(ay.facilitator).register(ay.network, new ExactEvmScheme());
   sunucu.registerExtension(bazaarResourceServerExtension);
