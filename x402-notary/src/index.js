@@ -1,3 +1,4 @@
+import { TOOL_MANIFESTS } from "./manifests.js";
 // Cloudflare Workers girişi. Gizli değişken: SERVICE_PRIVATE_KEY (yalnızca küçük bakiyeli hizmet cüzdanı).
 import { base } from "viem/chains";
 import { HTTPFacilitatorClient } from "@x402/core/server";
@@ -38,6 +39,7 @@ function kur(env, url) {
     adres: BASE,
     lp: BASE_LP,
     lpPrice: env.LP_PRICE || "$0.01",
+    toolManifests: TOOL_MANIFESTS,
     publicUrl: env.PUBLIC_URL || new URL(url).origin,
   });
   return onbellek;

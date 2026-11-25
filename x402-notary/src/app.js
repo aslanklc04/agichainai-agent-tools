@@ -366,7 +366,7 @@ export function uygulamaKur(ay) {
     finally { yakiyor = false; }
   };
 
-  app.get("/lp-lock", async (c) => {
+  const lpIsle = async (c, token) => {
     const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
     await hazirla();
     const kaynak = lpKaynak();
@@ -375,7 +375,6 @@ export function uygulamaKur(ay) {
       const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, lpBazaar);
       return json(c, pr, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) });
     };
-    const token = String(c.req.query("token") || "");
     const gecerli = /^0x[0-9a-fA-F]{40}$/.test(token);
     if (!baslik) return odemeIste(gecerli ? undefined : "add ?token=0x… (ERC-20 address on Base)");
     if (!gecerli) return json(c, { error: "token must be a 0x-prefixed 20-byte address" }, 400);
@@ -406,7 +405,19 @@ export function uygulamaKur(ay) {
     console.log("SETTLED_LP", JSON.stringify({ tx: tahsil.transaction, token }));
     try { c.executionCtx.waitUntil(yakmaDene()); } catch { yakmaDene(); }
     return json(c, { ...analiz, payment: { payer: tahsil.payer || dog.payer, transaction: tahsil.transaction, network: tahsil.network }, feeUse: "Half of accumulated fees buy AGI on Uniswap and burn it." }, 200, { "PAYMENT-RESPONSE": encodePaymentResponseHeader(tahsil) });
+  };
+  app.get("/lp-lock", (c) => lpIsle(c, String(c.req.query("token") || "")));
+  // ERC-8257 araç çağrısı: POST, JSON gövde {token}.
+  app.post("/lp-lock", async (c) => {
+    let g = {};
+    try { g = await c.req.json(); } catch {}
+    return lpIsle(c, String((g && g.token) || c.req.query("token") || ""));
   });
+
+  // ───────── ERC-8257 (OpenSea Agent Tool Registry) manifestoları ─────────
+  for (const [slug, m] of Object.entries(ay.toolManifests || {})) {
+    app.get(`/.well-known/ai-tool/${slug}.json`, (c) => json(c, m));
+  }
 
   app.notFound((c) => json(c, { error: "not found", see: ay.publicUrl + "/" }, 404));
   // Hata ayrıntısı herkese açık bilgiden ibarettir (anahtar asla mesajlarda yer almaz); ilk sürümde teşhis için döndürülür.
