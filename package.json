@@ -1,7 +1,7 @@
 {
   "name": "agichainai-agent-tools",
-  "version": "0.3.0",
-  "description": "Let AI agents use the AGI token on Base: price, buy/sell, USDC-paid notary, paid tasks, on-chain notary, agent directory. MCP server, Coinbase AgentKit action provider and elizaOS plugin.",
+  "version": "0.4.0",
+  "description": "Pre-trade LP lock / rug-pull check for Base tokens (elizaOS plugin, Coinbase AgentKit action, MCP), paid per call over x402 \u2014 plus AGI token tools: price, buy/sell, USDC-paid notary, tasks, agent directory.",
   "main": "src/core.js",
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.js"
@@ -12,7 +12,17 @@
     "mcp",
     "agentkit",
     "elizaos",
-    "ai-agents"
+    "ai-agents",
+    "rug-pull",
+    "rug-check",
+    "liquidity-lock",
+    "lp-lock",
+    "token-safety",
+    "x402",
+    "elizaos-plugin",
+    "agentkit-action-provider",
+    "honeypot",
+    "pre-trade"
   ],
   "license": "MIT",
   "dependencies": {
@@ -35,7 +45,9 @@
     "./viem": "./src/viem.js",
     "./mcp": "./src/mcp.js",
     "./agentkit": "./src/agentkit.js",
-    "./eliza": "./src/eliza.js"
+    "./eliza": "./src/eliza.js",
+    "./eliza-lp-lock": "./src/lp-lock-eliza.js",
+    "./agentkit-lp-lock": "./src/lp-lock-agentkit.js"
   },
   "files": [
     "src",

@@ -10,6 +10,27 @@ Lets AI agents use the **AGI token on Base mainnet**. One shared set of 13 tools
 | Coinbase AgentKit | `import { agiActionProvider } from "agichainai-agent-tools/agentkit"` |
 | elizaOS | `import { agiPlugin } from "agichainai-agent-tools/eliza"` |
 
+## Pre-trade LP lock check (rug-pull guard)
+
+Before your agent buys or accepts a Base token, check whether the liquidity can be pulled. One call returns, for every Uniswap V2, Aerodrome and AGIChainAI pool, the LP share **burned**, **locked** (UNCX, Team Finance, AGIChainAI lock, with unlock dates) and still **removable**, plus a verdict and `rugRisk`. **$0.01 USDC on Base per call over x402** — a gasless signature from the agent's wallet, no account, no API key. Nothing is charged for an invalid token.
+
+**elizaOS** — fires when a message has a Base token address and a word like *rug*, *locked*, *liquidity*, *safe*:
+
+```js
+import { lpLockPlugin } from "agichainai-agent-tools/eliza-lp-lock";
+character.plugins = [lpLockPlugin];
+// settings: AGENT_PRIVATE_KEY (wallet with a little USDC on Base), optional AGI_MAX_X402_USD (default 0.05)
+```
+
+**Coinbase AgentKit** — adds one action, `check_lp_lock`, paid through your wallet provider (CDP, Privy, viem…):
+
+```js
+import { lpLockActionProvider } from "agichainai-agent-tools/agentkit-lp-lock";
+const agentkit = await AgentKit.from({ walletProvider, actionProviders: [lpLockActionProvider({ maxX402Usd: 0.05 })] });
+```
+
+**Raw HTTP (any agent with an x402 client):** `GET https://agichainai-notary.aslanklc04.workers.dev/lp-lock?token=0x…` or `POST /lp-lock {"token":"0x…"}`. Also listed on the x402 Bazaar and the OpenSea Agent Tool Registry (ERC-8257, tool #1012). Humans: free verdict at [agichainai.com/exchange/lp-lock.html](https://agichainai.com/exchange/lp-lock.html) and [@AGIChainAI_LPCheck_bot](https://t.me/AGIChainAI_LPCheck_bot).
+
 ## Tools
 
 | Tool | What it does | Writes? |
