@@ -1,7 +1,7 @@
 // AGIChainAI LP Check — Telegram botu (Cloudflare Worker).
 // Gizli ayar: BOT_TOKEN. İsteğe bağlı: RPC_URL.
 // Webhook gizli anahtarı jetondan türetilir; hiçbir yerde gösterilmez.
-import { createPublicClient, http, fallback, isAddress, getAddress } from "viem";
+import { createPublicClient, http, isAddress, getAddress } from "viem";
 import { base } from "viem/chains";
 import { lpKilitAnalizi, BASE_LP } from "../x402-notary/src/lplock.js";
 
@@ -49,6 +49,23 @@ export function rapor(j) {
   return satirlar.join("\n");
 }
 
+const RPCLER = ["https://base.drpc.org", "https://1rpc.io/base", "https://base-rpc.publicnode.com", "https://mainnet.base.org", "https://base.llamarpc.com", "https://base.meowrpc.com"];
+async function analiz(env, adres) {
+  const rpc = [env.RPC_URL, ...RPCLER].filter(Boolean);
+  let son;
+  // Her denemede tek bir uç nokta: biri hız sınırına takılırsa diğerine geç.
+  for (const u of rpc) {
+    try {
+      const okur = createPublicClient({ chain: base, transport: http(u, { timeout: 10_000, retryCount: 0 }), batch: { multicall: true } });
+      return await lpKilitAnalizi(okur, BASE_LP, getAddress(adres));
+    } catch (e) {
+      son = e;
+      if (/not a contract|returned no data|reverted/i.test(String(e.shortMessage || e.message))) throw e;
+    }
+  }
+  throw son;
+}
+
 function adresBul(metin) {
   const m = String(metin || "").match(/0x[0-9a-fA-F]{40}/);
   return m ? m[0] : null;
@@ -75,10 +92,7 @@ async function isle(env, guncelleme) {
   await tg(env, "sendChatAction", { chat_id: sohbet, action: "typing" });
   let yanit;
   try {
-    const rpc = [env.RPC_URL, "https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.llamarpc.com"].filter(Boolean);
-    const okur = createPublicClient({ chain: base, transport: fallback(rpc.map((u) => http(u, { timeout: 12_000 })), { rank: false }), batch: { multicall: true } });
-    const j = await lpKilitAnalizi(okur, BASE_LP, getAddress(adres));
-    yanit = rapor(j);
+    yanit = rapor(await analiz(env, adres));
   } catch (e) {
     const m = String(e.shortMessage || e.message || e).split("\n")[0];
     yanit = /not a contract|returned no data|reverted/i.test(m) ? "That address is not an ERC-20 token on Base." : "Could not read the chain right now. Please try again in a minute.";
@@ -107,6 +121,13 @@ export default {
       await tg(env, "setMyDescription", { description: "Paste a Base token address or send /lpcheck 0x… to see whether its liquidity is burned, in a known locker (UNCX, Team Finance, AGIChainAI) or removable, plus a rug-risk verdict. Free, live on-chain reads. Add me to your group. Not financial advice." });
       const bilgi = await tg(env, "getWebhookInfo", {});
       return Response.json({ setWebhook: w.ok, description: w.description, webhook: bilgi.result && { url: bilgi.result.url, pending: bilgi.result.pending_update_count, lastError: bilgi.result.last_error_message || null } });
+    }
+
+    if (url.pathname === "/check") {
+      const a = url.searchParams.get("token") || "";
+      if (!isAddress(a)) return Response.json({ error: "token query parameter required" }, { status: 400 });
+      try { return Response.json(await analiz(env, a)); }
+      catch (e) { return Response.json({ error: String(e.shortMessage || e.message || e).split("\n").slice(0, 3).join(" | ") }, { status: 502 }); }
     }
 
     return Response.json({ ok: true, bot: "https://t.me/AGIChainAI_LPCheck_bot", usage: "Telegram: /lpcheck 0x…" });
