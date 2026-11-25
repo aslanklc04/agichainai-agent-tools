@@ -4,6 +4,7 @@
 import { createPublicClient, http, isAddress, getAddress } from "viem";
 import { base } from "viem/chains";
 import { lpKilitAnalizi, BASE_LP } from "../x402-notary/src/lplock.js";
+import { izlemeEkle, izlemeSil, tumIzlemeler, izlemeleriTara, IZLEME_GUN } from "../x402-notary/src/watch.js";
 
 const SAYFA = "https://agichainai.com/exchange/lp-lock.html";
 const API = "https://agichainai-notary.aslanklc04.workers.dev/lp-lock?token=";
@@ -30,6 +31,7 @@ const YARDIM =
   "Send <code>/lpcheck 0x…token</code> or just paste a token address.\n\n" +
   "Free verdict from live on-chain reads (Uniswap V2/V3, Aerodrome, AGIChainAI; lockers UNCX, Team Finance, AGIChainAI lock).\n" +
   "Full pool-by-pool report: $0.01 USDC on the web page or over x402 for AI agents.\n\n" +
+  "<b>Watch</b> a token for 30 days (free, up to 3 per chat): <code>/watch 0x…</code>. You get a message 7 days before an LP lock unlocks, when it unlocks, when the locked share or liquidity drops, or when the verdict changes. <code>/watches</code> lists them, <code>/unwatch 0x…</code> stops one.\n\n" +
   "Not financial advice.";
 
 export function rapor(j) {
@@ -82,6 +84,11 @@ async function isle(env, guncelleme) {
     await tg(env, "sendMessage", { chat_id: sohbet, text: YARDIM, parse_mode: "HTML", disable_web_page_preview: true });
     return;
   }
+  if (komut === "/watch" || komut === "/unwatch" || komut === "/watches") {
+    const yanit = await izlemeKomutu(env, komut, sohbet, metin);
+    await tg(env, "sendMessage", { chat_id: sohbet, reply_to_message_id: msj.message_id, text: yanit, parse_mode: "HTML", disable_web_page_preview: true });
+    return;
+  }
   // Gruplarda yalnızca /lpcheck komutuna yanıt ver; özel sohbette çıplak adres de olur.
   if (komut !== "/lpcheck" && !(ozel && !komut)) return;
   const adres = adresBul(metin);
@@ -100,7 +107,44 @@ async function isle(env, guncelleme) {
   await tg(env, "sendMessage", { chat_id: sohbet, reply_to_message_id: msj.message_id, text: yanit, parse_mode: "HTML", disable_web_page_preview: true });
 }
 
+const SOHBET_SINIRI = 3;
+async function izlemeKomutu(env, komut, sohbet, metin) {
+  if (!env.WATCH_KV) return "Watching is not enabled yet.";
+  const benim = (await tumIzlemeler(env.WATCH_KV)).filter((w) => w.hedef?.telegram === sohbet);
+  if (komut === "/watches") {
+    if (!benim.length) return "No active watches. Start one with <code>/watch 0x…</code>";
+    return benim.map((w) => `• <code>${esc(w.token)}</code> — ${esc(w.son.verdict.replace(/_/g, " "))}, $${sayi(w.son.liquidityUsd)} liquidity, until ${new Date(w.bitis * 1000).toISOString().slice(0, 10)}`).join("\n");
+  }
+  const adres = adresBul(metin);
+  if (komut === "/unwatch") {
+    const sil = benim.filter((w) => /\ball\b/i.test(metin) || (adres && w.token.toLowerCase() === adres.toLowerCase()));
+    for (const w of sil) await izlemeSil(env.WATCH_KV, w.id);
+    return sil.length ? `Stopped ${sil.length} watch(es).` : "Nothing to stop. Use <code>/unwatch 0x…</code> or <code>/unwatch all</code>.";
+  }
+  if (!adres || !isAddress(adres)) return "Send <code>/watch 0x…</code> with a Base token address.";
+  if (benim.some((w) => w.token.toLowerCase() === adres.toLowerCase())) return "Already watching that token here.";
+  if (benim.length >= SOHBET_SINIRI) return `This chat already has ${SOHBET_SINIRI} watches. Stop one with <code>/unwatch 0x…</code>.`;
+  let j;
+  try { j = await analiz(env, adres); } catch (e) { return /not a contract|returned no data|reverted/i.test(String(e.shortMessage || e.message)) ? "That address is not an ERC-20 token on Base." : "Could not read the chain right now. Please try again in a minute."; }
+  const { izleme, ilkOlaylar } = await izlemeEkle(env.WATCH_KV, { token: getAddress(adres), hedef: { telegram: sohbet } }, j, Math.floor(Date.now() / 1000));
+  let t = `👀 Watching <b>${esc(j.token.symbol)}</b> for ${IZLEME_GUN} days. I'll message here if an LP lock is about to unlock or unlocks, if the locked share or liquidity drops, or if the verdict changes.\n\nNow: ${esc(j.verdict.replace(/_/g, " "))} · rug risk ${esc(j.rugRisk.replace(/_/g, " "))} · $${sayi(izleme.son.liquidityUsd)} liquidity`;
+  for (const o of ilkOlaylar) t += `\n⚠️ ${esc(o.detail)}`;
+  return t;
+}
+
+async function tarama(env) {
+  if (!env.WATCH_KV || !env.BOT_TOKEN) return;
+  const r = await izlemeleriTara(env.WATCH_KV, (t) => analiz(env, t), async (w, o, s) => {
+    if (w.hedef?.telegram === undefined) return;
+    const link = `${SAYFA}?token=${w.token}`;
+    await tg(env, "sendMessage", { chat_id: w.hedef.telegram, text: `⚠️ <b>${esc(o.type.replace(/_/g, " "))}</b> · <code>${esc(w.token)}</code>\n${esc(o.detail)}\n\nNow: ${esc(s.verdict.replace(/_/g, " "))} · rug risk ${esc(s.rugRisk.replace(/_/g, " "))} · $${sayi(s.liquidityUsd)} liquidity\n<a href="${link}">Report</a> · Not financial advice.`, parse_mode: "HTML", disable_web_page_preview: true });
+  }, Math.floor(Date.now() / 1000));
+  console.log("TG_WATCH_SCAN", JSON.stringify(r));
+}
+
 export default {
+  async scheduled(_e, env, ctx) { ctx.waitUntil(tarama(env)); },
+
   async fetch(istek, env, ctx) {
     const url = new URL(istek.url);
     if (!env.BOT_TOKEN) return Response.json({ error: "BOT_TOKEN not configured" }, { status: 503 });
@@ -116,7 +160,7 @@ export default {
     // Webhook'u ve bot bilgilerini (yeniden) kaydeder. Tekrar çağrılması zararsızdır.
     if (url.pathname === "/setup") {
       const w = await tg(env, "setWebhook", { url: `${url.origin}/tg`, secret_token: anahtar, allowed_updates: ["message", "channel_post"], drop_pending_updates: true });
-      await tg(env, "setMyCommands", { commands: [{ command: "lpcheck", description: "Is this Base token's liquidity locked? /lpcheck 0x…" }, { command: "help", description: "How it works" }] });
+      await tg(env, "setMyCommands", { commands: [{ command: "lpcheck", description: "Is this Base token's liquidity locked? /lpcheck 0x…" }, { command: "watch", description: "Alert me if this token's LP unlocks or is pulled: /watch 0x…" }, { command: "watches", description: "List this chat's watches" }, { command: "unwatch", description: "Stop a watch: /unwatch 0x… or all" }, { command: "help", description: "How it works" }] });
       await tg(env, "setMyShortDescription", { short_description: "Free check: is a Base token's liquidity locked, burned or removable? Rug-risk verdict from live on-chain data." });
       await tg(env, "setMyDescription", { description: "Paste a Base token address or send /lpcheck 0x… to see whether its liquidity is burned, in a known locker (UNCX, Team Finance, AGIChainAI) or removable, plus a rug-risk verdict. Free, live on-chain reads. Add me to your group. Not financial advice." });
       const bilgi = await tg(env, "getWebhookInfo", {});

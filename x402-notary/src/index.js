@@ -39,6 +39,7 @@ function kur(env, url) {
     adres: BASE,
     lp: BASE_LP,
     lpPrice: env.LP_PRICE || "$0.01",
+    watchPrice: env.WATCH_PRICE || "$0.05",
     toolManifests: TOOL_MANIFESTS,
     publicUrl: env.PUBLIC_URL || new URL(url).origin,
   });
@@ -52,5 +53,11 @@ export default {
     } catch (e) {
       return new Response(JSON.stringify({ error: "service not configured" }), { status: 503, headers: { "content-type": "application/json" } });
     }
+  },
+  // Saatlik cron: LP izlemelerini tarar ve webhook'lara olay gönderir.
+  async scheduled(_event, env, ctx) {
+    if (!env.WATCH_KV) return;
+    const u = env.PUBLIC_URL || "https://agichainai-notary.aslanklc04.workers.dev";
+    ctx.waitUntil(kur(env, u).tara(env.WATCH_KV).then((r) => console.log("WATCH_SCAN", JSON.stringify(r))));
   },
 };

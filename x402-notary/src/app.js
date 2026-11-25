@@ -1,5 +1,6 @@
 // AGIChainAI x402 Notary — ajanlar USDC ile öder, kayıt Base'deki AGI noterine yazılır ve ücretin bir kısmı AGI alıp yakar.
 // Akış (ödeme ÖNCE tahsil edilir): istek → doğrulama → (ödeme yoksa 402) → ödeme doğrula → ödemeyi tahsil et → zincire yaz.
+import { izlemeEkle, izlemeOku, izlemeleriTara, olayGovdesi, webhookGecerli, IZLEME_GUN } from "./watch.js";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { x402ResourceServer } from "@x402/core/server";
@@ -189,6 +190,14 @@ export function uygulamaKur(ay) {
           responses: { "200": { description: "Lock analysis", content: { "application/json": { example: LP_ORNEK } } }, "402": { description: "Payment required (x402 v2, exact, USDC on Base)" }, "400": { description: "Invalid token; nothing charged" } },
         },
       },
+      "/lp-watch": {
+        post: {
+          operationId: "lpWatch", summary: "Watch a Base token's liquidity lock for 30 days (webhook alerts)",
+          "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: W_USD } },
+          requestBody: { required: true, content: { "application/json": { schema: W_SEMA } } },
+          responses: { "200": { description: "Watch created", content: { "application/json": { example: W_ORNEK } } }, "402": { description: "Payment required (x402 v2, exact, USDC on Base)" }, "400": { description: "Invalid token or webhook; nothing charged" } },
+        },
+      },
       "/notarize": {
         post: {
           operationId: "notarize", summary: "Notarize a SHA-256 fingerprint on Base",
@@ -204,7 +213,7 @@ export function uygulamaKur(ay) {
     },
     "x-discovery": { ownershipProofs: [] },
   }));
-  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/notarize", ay.publicUrl + "/lp-lock"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
+  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/notarize", ay.publicUrl + "/lp-lock", ay.publicUrl + "/lp-watch"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
 
   app.get("/", async (c) => {
     return json(c, {
@@ -213,6 +222,7 @@ export function uygulamaKur(ay) {
       description: "Prove a file or text existed at a point in time: its SHA-256 fingerprint is written to the AGIChainAI notary contract on Base. Pay per record in USDC over x402; no account, no API key, no AGI needed.",
       endpoints: {
         "POST /notarize": { price: typeof ay.price === "string" ? ay.price + " USDC" : ay.price, body: { hash: "0x + 64 hex chars (SHA-256 of your data)", label: "optional, up to ~50 characters" }, paid: "x402 (exact, USDC on Base)" },
+        "POST /lp-watch": { price: "$0.05 USDC", body: { token: "0x… (Base ERC-20)", webhook: "https://… (receives JSON events)" }, description: "30-day LP watch: webhook before an LP lock unlocks, when the locked share or liquidity drops, or the verdict changes. Status: GET /lp-watch/{id} (free)", paid: "x402 (exact, USDC on Base)" },
         "GET /lp-lock?token=0x…": { price: "$" + LP_USD + " USDC", description: "Liquidity-lock / rug-pull check for a Base token: burned, locked (with unlock dates) and removable LP share per pool", paid: "x402 (exact, USDC on Base)" },
         "GET /record/{hash}": { price: "free", description: "Check whether and when a fingerprint was recorded" },
         "GET /status": { price: "free" },
@@ -419,8 +429,61 @@ export function uygulamaKur(ay) {
     app.get(`/.well-known/ai-tool/${slug}.json`, (c) => json(c, m));
   }
 
+
+  // ───────── LP izleme (POST /lp-watch, 30 gün, webhook) ─────────
+  const W_FIYAT = ay.watchPrice || "$0.05";
+  const W_USD = typeof W_FIYAT === "string" ? W_FIYAT.replace("$", "") : (Number(W_FIYAT.amount) / 1e6).toFixed(2);
+  const W_SEMA = { type: "object", required: ["token", "webhook"], properties: { token: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$", description: "ERC-20 token address on Base" }, webhook: { type: "string", description: "https URL that receives a JSON POST for each event" } } };
+  const W_ORNEK = { watchId: "3f2a…", token: "0x…", expiresAt: "2026-12-25T00:00:00.000Z", baseline: { verdict: "MOSTLY_LOCKED", rugRisk: "MEDIUM", protectedPct: 91.2, liquidityUsd: 48210.5 }, events: ["LIQUIDITY_DROP", "PROTECTION_DROP", "VERDICT_CHANGE", "UNLOCK_SOON", "UNLOCKED"] };
+  const wBazaar = declareDiscoveryExtension({ method: "POST", input: { token: "0x4200000000000000000000000000000000000006", webhook: "https://example.com/hooks/lp" }, inputSchema: W_SEMA, bodyType: "json", output: { example: W_ORNEK } });
+  const wKaynak = () => ({
+    url: ay.publicUrl + "/lp-watch",
+    description: `Watch a Base token's liquidity for ${IZLEME_GUN} days and get a webhook before it can be pulled: alerts when an LP lock (UNCX) is 7 days from unlocking or unlocks, when the burned/locked LP share drops, when liquidity falls 30%+, or when the rug-risk verdict changes. Checked hourly from live on-chain data. $${W_USD} USDC once, no API key. Nothing is charged for an invalid token or webhook.`,
+    mimeType: "application/json", serviceName: "AGIChainAI LP Watch",
+    tags: ["rug-pull", "liquidity-lock", "monitoring", "alerts", "webhook", "base", "token-safety"],
+    iconUrl: "https://agichainai.com/assets/agi-token-256.png",
+  });
+  app.post("/lp-watch", async (c) => {
+    const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
+    await hazirla();
+    const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: W_FIYAT, network: ay.network, maxTimeoutSeconds: 120 });
+    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, wKaynak(), hata, wBazaar); return json(c, pr, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
+    let g = {}; try { g = await c.req.json(); } catch {}
+    const token = String(g.token || ""), webhook = String(g.webhook || "");
+    if (!baslik) return odemeIste();
+    if (!c.env?.WATCH_KV) return json(c, { error: "Watching is not enabled yet; nothing was charged." }, 503);
+    if (!/^0x[0-9a-fA-F]{40}$/.test(token)) return json(c, { error: "token must be a 0x-prefixed 20-byte address; nothing was charged." }, 400);
+    if (!webhookGecerli(webhook)) return json(c, { error: "webhook must be a public https URL (no IPs, no credentials); nothing was charged." }, 400);
+    let ilk;
+    try { ilk = await lpKilitAnalizi(okur, ay.lp, token); }
+    catch (e) { if (e.kullanici) return json(c, { error: e.message + "; nothing was charged." }, 400); return json(c, { error: "Could not read the chain right now; nothing was charged." }, 503); }
+    let yuk; try { yuk = decodePaymentSignatureHeader(baslik); } catch { return odemeIste("invalid payment header"); }
+    const sart = sartlar.find((x) => x.scheme === yuk.accepted?.scheme && x.network === yuk.accepted?.network) || sartlar[0];
+    let dog; try { dog = await sunucu.verifyPayment(yuk, sart, wBazaar); } catch (e) { return odemeIste("verification failed: " + (e.message || e)); }
+    if (!dog.isValid) return odemeIste(dog.invalidReason || "payment invalid");
+    try { const pr = await sunucu.createPaymentRequiredResponse(sartlar, wKaynak(), undefined, wBazaar); yuk.extensions = { ...(pr.extensions || {}), ...(yuk.extensions || {}) }; if (!yuk.resource) yuk.resource = pr.resource; } catch {}
+    let tahsil; try { tahsil = await sunucu.settlePayment(yuk, sart, wBazaar); } catch (e) { return odemeIste("settlement failed: " + (e.message || e)); }
+    if (!tahsil.success) return odemeIste(tahsil.errorReason || "settlement failed");
+    const simdi = Math.floor(Date.now() / 1000);
+    const { izleme, ilkOlaylar } = await izlemeEkle(c.env.WATCH_KV, { token, hedef: { webhook }, odeyen: tahsil.payer || dog.payer, odemeTx: tahsil.transaction }, ilk, simdi);
+    console.log("SETTLED_WATCH", JSON.stringify({ tx: tahsil.transaction, token, id: izleme.id }));
+    try { c.executionCtx.waitUntil(yakmaDene()); } catch { yakmaDene(); }
+    return json(c, { watchId: izleme.id, token, webhook, expiresAt: new Date(izleme.bitis * 1000).toISOString(), status: ay.publicUrl + "/lp-watch/" + izleme.id, baseline: { verdict: izleme.son.verdict, rugRisk: izleme.son.rugRisk, protectedPct: izleme.son.protectedPct, liquidityUsd: izleme.son.liquidityUsd, locks: izleme.son.kilitler }, alreadyDue: ilkOlaylar, events: ["LIQUIDITY_DROP", "PROTECTION_DROP", "VERDICT_CHANGE", "UNLOCK_SOON", "UNLOCKED"], payment: { payer: tahsil.payer || dog.payer, transaction: tahsil.transaction, network: tahsil.network } }, 200, { "PAYMENT-RESPONSE": encodePaymentResponseHeader(tahsil) });
+  });
+  app.get("/lp-watch/:id", async (c) => {
+    if (!c.env?.WATCH_KV) return json(c, { error: "watching not enabled" }, 503);
+    const w = await izlemeOku(c.env.WATCH_KV, c.req.param("id"));
+    if (!w) return json(c, { error: "not found or expired" }, 404);
+    return json(c, { watchId: w.id, token: w.token, expiresAt: new Date(w.bitis * 1000).toISOString(), lastCheck: new Date(w.son.t * 1000).toISOString(), current: { verdict: w.son.verdict, rugRisk: w.son.rugRisk, protectedPct: w.son.protectedPct, liquidityUsd: w.son.liquidityUsd, locks: w.son.kilitler }, eventsSent: w.olaySayisi });
+  });
+  // Zamanlanmış tarama (index.js scheduled → tara)
+  const tara = async (kv) => izlemeleriTara(kv, (t) => lpKilitAnalizi(okur, ay.lp, t), async (w, o, s) => {
+    if (!w.hedef?.webhook) return;
+    await fetch(w.hedef.webhook, { method: "POST", headers: { "content-type": "application/json", "user-agent": "AGIChainAI-LP-Watch/1" }, body: JSON.stringify(olayGovdesi(w, o, s)), signal: AbortSignal.timeout(8000) });
+  }, Math.floor(Date.now() / 1000));
+
   app.notFound((c) => json(c, { error: "not found", see: ay.publicUrl + "/" }, 404));
   // Hata ayrıntısı herkese açık bilgiden ibarettir (anahtar asla mesajlarda yer almaz); ilk sürümde teşhis için döndürülür.
   app.onError((e, c) => { console.error("ERR", e && (e.stack || e.message)); return json(c, { error: "internal error", detail: String((e && (e.shortMessage || e.message)) || e).slice(0, 300) }, 500); });
-  return { app, hesap };
+  return { app, hesap, tara };
 }
