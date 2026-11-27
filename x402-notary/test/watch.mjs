@@ -33,4 +33,23 @@ simdikiRapor = rapor({ liquidityUsd: { v2Style: 100, v3: 0 } });
 const s2 = await tara(T0 + 7200); assert.equal(s2.olay, 1); assert.equal(giden[0].type, "LIQUIDITY_DROP"); assert.equal(giden[0].watchId, izleme.id);
 assert.equal((await tara(T0 + 10800)).olay, 0);
 assert.equal((await tara(T0 + 31 * 86400)).bitti, 1); assert.equal(await izlemeOku(KV, izleme.id), null);
+// Tek seferlik hatalı okuma (ikinci okumada düzelen) alarm üretmez; kalıcı değişiklik üretir.
+{
+  const kv2 = new Map(); const K2 = { get: async (k) => kv2.get(k) ?? null, put: async (k, v) => kv2.set(k, v), delete: async (k) => kv2.delete(k), list: async ({ prefix }) => ({ keys: [...kv2.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) };
+  const { izleme: z } = await izlemeEkle(K2, { token: "0xT", hedef: { telegram: 1 } }, rapor(), T0);
+  const g2 = []; let sira = [];
+  const an = async () => sira.shift();
+  sira = [rapor({ protectedPctWeightedByLiquidity: 0, verdict: "NOT_LOCKED", rugRisk: "HIGH" }), rapor()];
+  let r = await izlemeleriTara(K2, an, async (w, o) => g2.push(o.type), T0 + 3600);
+  assert.equal(g2.length, 0, "flap must not alert"); assert.equal(r.dogrulanmadi, 1);
+  assert.equal(JSON.parse(kv2.get("w:" + z.id)).son.verdict, "LOCKED_OR_BURNED");
+  const kotu = rapor({ protectedPctWeightedByLiquidity: 0, verdict: "NOT_LOCKED", rugRisk: "HIGH" });
+  sira = [kotu, kotu];
+  r = await izlemeleriTara(K2, an, async (w, o) => g2.push(o.type), T0 + 7200);
+  assert.deepEqual(g2.sort(), ["PROTECTION_DROP", "VERDICT_CHANGE"]);
+  // okuma hatası: anlık görüntü değişmez, alarm yok
+  sira = []; const hatali = async () => { throw new Error("HTTP request failed"); };
+  r = await izlemeleriTara(K2, hatali, async (w, o) => g2.push(o.type), T0 + 10800);
+  assert.equal(r.hata, 1); assert.equal(g2.length, 2);
+}
 console.log("watch: all ok");

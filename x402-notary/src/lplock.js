@@ -41,6 +41,15 @@ export const BASE_LP = {
   ],
 };
 
+/** Ağ / RPC kaynaklı hata mı (geçici), yoksa sözleşmenin kendi cevabı mı? */
+export function agHatasi(e) {
+  for (let x = e, i = 0; x && i < 8; x = x.cause, i++) {
+    if (/HttpRequestError|TimeoutError|RpcRequestError|LimitExceededRpcError|InternalRpcError|ResourceUnavailableRpcError|WebSocketRequestError/.test(x.name || "")) return true;
+    if (/HTTP request failed|timed out|timeout|rate.?limit|429|limit exceeded|request limit|too many requests|fetch failed|network error|ECONNRESET|socket hang up/i.test(String(x.shortMessage || x.message || ""))) return true;
+  }
+  return false;
+}
+
 const yuzde = (pay, payda) => (payda === 0n ? 0 : Number((pay * 1_000_000n) / payda) / 10_000);
 
 /**
@@ -56,7 +65,9 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
   const kod = await okur.getCode({ address: token });
   if (!kod || kod === "0x") { const e = new Error("not a contract on Base"); e.kullanici = true; throw e; }
   const oku = (address, abi, functionName, args = []) => okur.readContract({ address, abi, functionName, args });
-  const guvenli = (p) => p.catch(() => null);
+  // Sözleşme "yok/geri çevirdi" derse varsayılan değer; ağ/RPC hatasında ise hata yükselir:
+  // okunamayan veri asla "kilit yok" ya da "havuz yok" sayılmaz (izleme yanlış alarm vermesin).
+  const guvenli = (p, varsay = null) => p.catch((e) => { if (agHatasi(e)) throw e; return varsay; });
 
   const [ad, sembol, ondalik, arz] = await Promise.all([
     guvenli(oku(token, ERC20, "name")), guvenli(oku(token, ERC20, "symbol")),
@@ -67,7 +78,7 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
   const quotes = [{ sym: "WETH", address: getAddress(ay.weth), dec: 18 }, { sym: "USDC", address: getAddress(ay.usdc), dec: 6 }]
     .filter((q) => q.address !== token);
   let ethUsd = null;
-  try { const r = await oku(ay.ethUsd, CHAINLINK, "latestRoundData"); ethUsd = Number(r[1]) / 1e8; } catch {}
+  try { const r = await oku(ay.ethUsd, CHAINLINK, "latestRoundData"); ethUsd = Number(r[1]) / 1e8; } catch (e) { if (agHatasi(e)) throw e; }
   const usd = (q, ham) => (q.sym === "USDC" ? Number(formatUnits(ham, 6)) : ethUsd ? Number(formatUnits(ham, 18)) * ethUsd : null);
 
   // 1) V2 tarzı havuzları bul
@@ -85,7 +96,7 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
     const rToken = tokenIlk ? rez[0] : rez[1], rQuote = tokenIlk ? rez[1] : rez[0];
     const qUsd = usd(h.q, rQuote);
     const yakilan = (await Promise.all(YAKMA.map((a) => oku(h.pair, ERC20, "balanceOf", [a])))).reduce((s, x) => s + x, 0n);
-    const bakiyeler = await Promise.all(ay.lockers.map((L) => oku(h.pair, ERC20, "balanceOf", [L.address]).catch(() => 0n)));
+    const bakiyeler = await Promise.all(ay.lockers.map((L) => guvenli(oku(h.pair, ERC20, "balanceOf", [L.address]), 0n)));
     const kilitler = [];
     for (const [i, L] of ay.lockers.entries()) {
       const bak = bakiyeler[i];
@@ -102,9 +113,9 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
             enYakin = enYakin === null ? u : Math.min(enYakin, u); enUzak = enUzak === null ? u : Math.max(enUzak, u);
           }
           if (enYakin !== null) { k.earliestUnlock = new Date(enYakin * 1000).toISOString(); k.latestUnlock = new Date(enUzak * 1000).toISOString(); k.expired = enYakin <= simdi; }
-        } catch {}
+        } catch (e) { if (agHatasi(e)) throw e; }
       } else if (L.type === "agichainai") {
-        try { const [aktif] = await oku(L.address, BIZIM_KILIT, "aktifMiktar", [h.pair, 0n, 200n]); k.activePct = yuzde(aktif, lpArz); } catch {}
+        try { const [aktif] = await oku(L.address, BIZIM_KILIT, "aktifMiktar", [h.pair, 0n, 200n]); k.activePct = yuzde(aktif, lpArz); } catch (e) { if (agHatasi(e)) throw e; }
       }
       kilitler.push(k);
     }

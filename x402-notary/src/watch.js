@@ -108,8 +108,20 @@ export async function izlemeleriTara(kv, analiz, bildir, simdi, { sinir = 40 } =
     if (simdi >= w.bitis) { await kv.delete("w:" + w.id); sonuc.bitti++; continue; }
     try {
       if (!onbellek.has(w.token)) onbellek.set(w.token, await analiz(w.token));
-      const yeni = anlik(onbellek.get(w.token), simdi);
-      const { olaylar: ol, gonderildi } = olaylar(w.son, yeni, w.gonderildi);
+      let yeni = anlik(onbellek.get(w.token), simdi);
+      let { olaylar: ol, gonderildi } = olaylar(w.son, yeni, w.gonderildi);
+      if (ol.length) {
+        // Doğrulama: bir değişiklik görülünce zinciri bağımsız olarak bir kez daha oku. Yalnızca iki
+        // okumada da görülen olaylar bildirilir; tek seferlik okuma hataları alarm üretmez.
+        let ikinci;
+        try { ikinci = await analiz(w.token, { tazele: true }); } catch { sonuc.hata++; continue; }
+        const yeni2 = anlik(ikinci, simdi);
+        const r2 = olaylar(w.son, yeni2, w.gonderildi);
+        const ortak = new Set(ol.map((o) => o.type).filter((t) => r2.olaylar.some((o) => o.type === t)));
+        if (!ortak.size) { sonuc.dogrulanmadi = (sonuc.dogrulanmadi || 0) + 1; continue; }
+        onbellek.set(w.token, ikinci);
+        yeni = yeni2; ol = r2.olaylar.filter((o) => ortak.has(o.type)); gonderildi = r2.gonderildi;
+      }
       for (const o of ol) { try { await bildir(w, o, yeni); } catch {} }
       const degisti = ol.length > 0 || JSON.stringify({ ...w.son, t: 0 }) !== JSON.stringify({ ...yeni, t: 0 });
       w.son = yeni; w.gonderildi = gonderildi; w.olaySayisi += ol.length;
