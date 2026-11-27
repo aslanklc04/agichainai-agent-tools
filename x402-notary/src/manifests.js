@@ -11,7 +11,7 @@ export const TOOL_MANIFESTS = {
     type: TIP,
     name: "Base Token Check",
     description:
-      "Pre-trade safety check for a Base ERC-20: simulates buy, wallet transfer and sell against the real pool (honeypot, taxes), flags owner powers (mint, blacklist, pause, fee change), proxies and removable LP. Verdict SAFE/CAUTION/DANGER, 0-100 score. Free for wallets holding 1M AGI.",
+      "Pre-trade safety check for a Base ERC-20: simulates buy, wallet transfer and sell against the real pool (honeypot, taxes), flags owner powers (mint, blacklist, pause, fee change), proxies and removable LP. Verdict SAFE/CAUTION/DANGER, 0-100 score. Free with a 30-day AGI pass.",
     endpoint: KOK + "/token-check",
     inputs: {
       type: "object",

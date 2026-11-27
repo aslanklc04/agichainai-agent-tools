@@ -1,7 +1,7 @@
 import { isAddress } from "viem";
 import { gasBilgisi, fiyatBilgisi, bakiyeBilgisi } from "./basedata.js";
 import { tokenKontrol } from "./tokencheck.js";
-import { holderDogrula, ipSiniri, HOLDER_MESAJ } from "./holder.js";
+import { holderDogrula, ipSiniri, HOLDER_MESAJ, gecisEtkinlestir, gecisDurumu, GECIS_GUN } from "./holder.js";
 // AGIChainAI x402 Notary — ajanlar USDC ile öder, kayıt Base'deki AGI noterine yazılır ve ücretin bir kısmı AGI alıp yakar.
 // Akış (ödeme ÖNCE tahsil edilir): istek → doğrulama → (ödeme yoksa 402) → ödeme doğrula → ödemeyi tahsil et → zincire yaz.
 import { izlemeEkle, izlemeOku, izlemeleriTara, olayGovdesi, webhookGecerli, IZLEME_GUN } from "./watch.js";
@@ -198,7 +198,7 @@ export function uygulamaKur(ay) {
         get: {
           operationId: "tokenCheck", summary: "Pre-trade token safety check (honeypot/tax simulation, owner powers, LP lock)",
           "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: TC_USD } },
-          parameters: [{ name: "token", in: "query", required: true, schema: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$" } }, { name: "AGI-HOLDER", in: "header", required: false, schema: { type: "string" }, description: "base64 JSON {address, issuedAt, signature}; free for wallets holding the minimum AGI" }],
+          parameters: [{ name: "token", in: "query", required: true, schema: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$" } }, { name: "AGI-HOLDER", in: "header", required: false, schema: { type: "string" }, description: "base64 JSON {address, issuedAt, signature}; free with an active AGI pass (POST /pass/activate after burning AGI)" }],
           responses: { "200": { description: "Report", content: { "application/json": { example: TC_ORNEK } } }, "402": { description: "Payment required (x402 v2, exact, USDC on Base)" }, "400": { description: "Invalid token; nothing charged" } },
         },
       },
@@ -240,7 +240,8 @@ export function uygulamaKur(ay) {
       description: "Prove a file or text existed at a point in time: its SHA-256 fingerprint is written to the AGIChainAI notary contract on Base. Pay per record in USDC over x402; no account, no API key, no AGI needed.",
       endpoints: {
         "POST /notarize": { price: typeof ay.price === "string" ? ay.price + " USDC" : ay.price, body: { hash: "0x + 64 hex chars (SHA-256 of your data)", label: "optional, up to ~50 characters" }, paid: "x402 (exact, USDC on Base)" },
-        "GET /token-check?token=0x…": { price: "$0.01 USDC (free for AGI holders via AGI-HOLDER header)", description: "Pre-trade check: buy/transfer/sell simulation (honeypot, taxes), owner powers, proxy, LP lock; verdict SAFE/CAUTION/DANGER", paid: "x402 (exact, USDC on Base)" },
+        "POST /pass/activate": { price: "free", body: { tx: "0x… hash of a transaction that burned at least 1,000,000 AGI (transfer to 0x…dEaD)" }, description: "Activates a 30-day AGI pass for the burning wallet (2x burn = 60 days, up to 12x). With a pass, send the signed AGI-HOLDER header for free paid-endpoint calls within daily limits. Status: GET /pass/{address}" },
+        "GET /token-check?token=0x…": { price: "$0.01 USDC (free with an AGI pass via the AGI-HOLDER header)", description: "Pre-trade check: buy/transfer/sell simulation (honeypot, taxes), owner powers, proxy, LP lock; verdict SAFE/CAUTION/DANGER", paid: "x402 (exact, USDC on Base)" },
         "GET /token-check/lite?token=0x…": { price: "free (daily limit per IP)", description: "Verdict, score and risk codes only" },
         "POST /lp-watch": { price: "$0.05 USDC", body: { token: "0x… (Base ERC-20)", webhook: "https://… (receives JSON events)" }, description: "30-day LP watch: webhook before an LP lock unlocks, when the locked share or liquidity drops, or the verdict changes. Status: GET /lp-watch/{id} (free)", paid: "x402 (exact, USDC on Base)" },
         "GET /lp-lock?token=0x…": { price: "$" + LP_USD + " USDC", description: "Liquidity-lock / rug-pull check for a Base token: burned, locked (with unlock dates) and removable LP share per pool", paid: "x402 (exact, USDC on Base)" },
@@ -460,7 +461,7 @@ export function uygulamaKur(ay) {
   const tcBazaar = declareDiscoveryExtension({ input: { token: "0x4200000000000000000000000000000000000006" }, inputSchema: { properties: { token: { type: "string", description: "ERC-20 token address on Base" } }, required: ["token"] }, output: { example: TC_ORNEK } });
   const tcKaynak = () => ({
     url: ay.publicUrl + "/token-check",
-    description: `Pre-trade safety check for any Base ERC-20 before your agent buys: simulates buy → wallet transfer → sell against the real pool (honeypot, buy/sell/transfer tax), detects owner powers (mint, blacklist, pause, fee change, trading switch), upgradeable proxies, and whether LP is burned, locked (UNCX/Team Finance, with unlock dates) or removable. Verdict SAFE / CAUTION / DANGER / UNVERIFIED with a 0-100 score. $${TC_USD} USDC; free for wallets holding ${H_MIN / 10n ** 18n} AGI (AGI-HOLDER header); free lite verdict at /token-check/lite. Nothing is charged for an invalid token.`,
+    description: `Pre-trade safety check for any Base ERC-20 before your agent buys: simulates buy → wallet transfer → sell against the real pool (honeypot, buy/sell/transfer tax), detects owner powers (mint, blacklist, pause, fee change, trading switch), upgradeable proxies, and whether LP is burned, locked (UNCX/Team Finance, with unlock dates) or removable. Verdict SAFE / CAUTION / DANGER / UNVERIFIED with a 0-100 score. $${TC_USD} USDC, or free (${H_GUN}/day) with a 30-day AGI pass (burn ${H_MIN / 10n ** 18n} AGI, then send the AGI-HOLDER header); free lite verdict at /token-check/lite. Nothing is charged for an invalid token.`,
     mimeType: "application/json", serviceName: "AGIChainAI Token Check",
     tags: ["token-safety", "honeypot", "rug-pull", "pre-trade", "sell-simulation", "base", "security"],
     iconUrl: "https://agichainai.com/assets/agi-token-256.png",
@@ -470,7 +471,7 @@ export function uygulamaKur(ay) {
     const holder = c.req.header("AGI-HOLDER");
     await hazirla();
     const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: TC_FIYAT, network: ay.network, maxTimeoutSeconds: 120 });
-    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, tcKaynak(), hata, tcBazaar); return json(c, { ...pr, holderAccess: { header: "AGI-HOLDER", minimumAgi: String(H_MIN / 10n ** 18n), dailyLimit: H_GUN, message: HOLDER_MESAJ("0x0000000000000000000000000000000000000000", "<ISO time>").replace("0x0000000000000000000000000000000000000000", "<your address>"), docs: "https://agichainai.com/pages/agi.html" }, freeLite: ay.publicUrl + "/token-check/lite?token=0x…" }, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
+    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, tcKaynak(), hata, tcBazaar); return json(c, { ...pr, holderAccess: { pass: `burn ${H_MIN / 10n ** 18n} AGI to 0x000000000000000000000000000000000000dEaD, then POST {"tx":"0x…"} to ${ay.publicUrl}/pass/activate for ${GECIS_GUN} days`, header: "AGI-HOLDER", burnAgi: String(H_MIN / 10n ** 18n), days: GECIS_GUN, dailyLimit: H_GUN, message: HOLDER_MESAJ("0x0000000000000000000000000000000000000000", "<ISO time>").replace("0x0000000000000000000000000000000000000000", "<your address>"), docs: "https://agichainai.com/pages/agi.html" }, freeLite: ay.publicUrl + "/token-check/lite?token=0x…" }, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
     const gecerli = /^0x[0-9a-fA-F]{40}$/.test(token);
     if (!baslik && !holder) return odemeIste(gecerli ? undefined : "add ?token=0x… (ERC-20 address on Base)");
     if (!gecerli) return json(c, { error: "token must be a 0x-prefixed 20-byte address" }, 400);
@@ -512,7 +513,7 @@ export function uygulamaKur(ay) {
     if (!s.ok) return json(c, { error: `free lite limit of ${LITE_GUN} per day reached; use /token-check ($${TC_USD}) or hold AGI for free access` }, 429);
     try {
       const a = await tokenKontrol(okur, ay.lp, token);
-      return json(c, { token: a.token, verdict: a.verdict, score: a.score, risks: a.risks.map((r) => r.code), honeypot: a.simulation.simulated ? !a.simulation.sellOk : null, sellTaxPct: a.simulation.sellTaxPct ?? null, rugRisk: a.liquidity.rugRisk, full: ay.publicUrl + "/token-check?token=" + a.token, fullPrice: "$" + TC_USD, holderAccess: `free full checks for wallets holding ${H_MIN / 10n ** 18n} AGI`, remainingToday: s.remaining });
+      return json(c, { token: a.token, verdict: a.verdict, score: a.score, risks: a.risks.map((r) => r.code), honeypot: a.simulation.simulated ? !a.simulation.sellOk : null, sellTaxPct: a.simulation.sellTaxPct ?? null, rugRisk: a.liquidity.rugRisk, full: ay.publicUrl + "/token-check?token=" + a.token, fullPrice: "$" + TC_USD, holderAccess: `free full checks (${H_GUN}/day) with a ${GECIS_GUN}-day AGI pass: burn ${H_MIN / 10n ** 18n} AGI and POST the tx to /pass/activate`, remainingToday: s.remaining });
     } catch (e) {
       if (e.kullanici) return json(c, { error: e.message }, 400);
       return json(c, { error: "Could not read the chain right now." }, 503);
@@ -528,7 +529,7 @@ export function uygulamaKur(ay) {
     const holder = c.req.header("AGI-HOLDER");
     await hazirla();
     const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: D_FIYAT, network: ay.network, maxTimeoutSeconds: 120 });
-    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, bazaar); return json(c, { ...pr, holderAccess: { header: "AGI-HOLDER", minimumAgi: String(H_MIN / 10n ** 18n), dailyLimit: D_GUN, docs: "https://agichainai.com/pages/agi.html" } }, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
+    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, bazaar); return json(c, { ...pr, holderAccess: { pass: `burn ${H_MIN / 10n ** 18n} AGI to 0x000000000000000000000000000000000000dEaD, then POST {"tx":"0x…"} to ${ay.publicUrl}/pass/activate for ${GECIS_GUN} days`, header: "AGI-HOLDER", burnAgi: String(H_MIN / 10n ** 18n), days: GECIS_GUN, dailyLimit: D_GUN, docs: "https://agichainai.com/pages/agi.html" } }, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
     if (!baslik && !holder) return odemeIste();
     let sonuc;
     try { sonuc = await uret(); }
@@ -557,7 +558,7 @@ export function uygulamaKur(ay) {
     try { c.executionCtx.waitUntil(yakmaDene()); } catch { yakmaDene(); }
     return json(c, { ...sonuc, payment: { payer: tahsil.payer || dog.payer, transaction: tahsil.transaction, network: tahsil.network } }, 200, { "PAYMENT-RESPONSE": encodePaymentResponseHeader(tahsil) });
   };
-  const veriKaynak = (yol, aciklama, etiketler) => ({ url: ay.publicUrl + yol, description: aciklama + ` $${D_USD} USDC per call; free (${D_GUN}/day) for wallets holding ${H_MIN / 10n ** 18n} AGI via the AGI-HOLDER header.`, mimeType: "application/json", serviceName: "AGIChainAI Base Data", tags: ["base", "data", ...etiketler], iconUrl: "https://agichainai.com/assets/agi-token-256.png" });
+  const veriKaynak = (yol, aciklama, etiketler) => ({ url: ay.publicUrl + yol, description: aciklama + ` $${D_USD} USDC per call, or free (${D_GUN}/day) with a ${GECIS_GUN}-day AGI pass (burn ${H_MIN / 10n ** 18n} AGI).`, mimeType: "application/json", serviceName: "AGIChainAI Base Data", tags: ["base", "data", ...etiketler], iconUrl: "https://agichainai.com/assets/agi-token-256.png" });
   const gasB = declareDiscoveryExtension({ input: {}, output: { example: { block: 38500000, baseFeeGwei: "0.006", priorityFeeGwei: "0.001", suggested: { standard: { maxFeePerGasGwei: "0.01", maxPriorityFeePerGasGwei: "0.001" } } } } });
   const fiyatB = declareDiscoveryExtension({ input: { token: "0x532f27101965dd16442E59d40670FaF5eBB142E4" }, inputSchema: { properties: { token: { type: "string" } }, required: ["token"] }, output: { example: { priceUsd: 0.0123, source: { dex: "uniswap-v2", quote: "WETH", liquidityUsd: 152000 } } } });
   const bakiyeB = declareDiscoveryExtension({ input: { address: "0x4200000000000000000000000000000000000006", tokens: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" }, inputSchema: { properties: { address: { type: "string" }, tokens: { type: "string", description: "comma-separated ERC-20 addresses (max 20)" } }, required: ["address"] }, output: { example: { eth: "0.42", tokens: [{ symbol: "USDC", balance: "12.5" }] } } });
@@ -569,6 +570,24 @@ export function uygulamaKur(ay) {
   app.get("/base/balance", (c) => {
     const a = String(c.req.query("address") || ""), tk = String(c.req.query("tokens") || "").split(",").map((x) => x.trim()).filter(Boolean);
     return odemeli(c, { etiket: "BALANCE", bazaar: bakiyeB, kaynak: veriKaynak("/base/balance", "ETH and ERC-20 balances of any Base address (up to 20 tokens per call), plus whether it is a contract.", ["balance", "wallet"]), uret: () => bakiyeBilgisi(okur, a, tk) });
+  });
+
+  // ───────── AGI geçişi (30 gün; AGI yakılarak alınır) ─────────
+  app.post("/pass/activate", async (c) => {
+    let g = {}; try { g = await c.req.json(); } catch {}
+    try {
+      const r = await gecisEtkinlestir({ okur, kv: c.env?.WATCH_KV, agi: ay.adres.agi, minimum: H_MIN, tx: String(g.tx || c.req.query("tx") || "") });
+      console.log("PASS_ACTIVATED", JSON.stringify(r));
+      return json(c, { ok: true, ...r, days: GECIS_GUN, dailyLimits: { tokenCheck: H_GUN, baseData: D_GUN }, header: "AGI-HOLDER: base64(JSON {address, issuedAt, signature}) where signature = personal_sign(\"AGIChainAI holder access\\nAddress: <checksummed address>\\nIssued: <ISO time>\")" });
+    } catch (e) {
+      if (e.kullanici) return json(c, { error: e.message }, 400);
+      return json(c, { error: "Could not verify the burn right now; try again." }, 503);
+    }
+  });
+  app.get("/pass/:adres", async (c) => {
+    const a = c.req.param("adres");
+    if (!isAddress(a)) return json(c, { error: "address required" }, 400);
+    return json(c, { ...(await gecisDurumu(c.env?.WATCH_KV, a)), burnAgiFor30Days: String(H_MIN / 10n ** 18n) });
   });
 
   // ───────── LP izleme (POST /lp-watch, 30 gün, webhook) ─────────
