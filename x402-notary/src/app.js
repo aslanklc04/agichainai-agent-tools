@@ -1,3 +1,5 @@
+import { isAddress } from "viem";
+import { gasBilgisi, fiyatBilgisi, bakiyeBilgisi } from "./basedata.js";
 import { tokenKontrol } from "./tokencheck.js";
 import { holderDogrula, ipSiniri, HOLDER_MESAJ } from "./holder.js";
 // AGIChainAI x402 Notary — ajanlar USDC ile öder, kayıt Base'deki AGI noterine yazılır ve ücretin bir kısmı AGI alıp yakar.
@@ -200,6 +202,9 @@ export function uygulamaKur(ay) {
           responses: { "200": { description: "Report", content: { "application/json": { example: TC_ORNEK } } }, "402": { description: "Payment required (x402 v2, exact, USDC on Base)" }, "400": { description: "Invalid token; nothing charged" } },
         },
       },
+      "/base/gas": { get: { operationId: "baseGas", summary: "Live Base gas and suggested EIP-1559 fees", "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: D_USD } }, responses: { "200": { description: "Gas" }, "402": { description: "Payment required" } } } },
+      "/base/price": { get: { operationId: "basePrice", summary: "USD price of a Base ERC-20 from its deepest V2-style pool", "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: D_USD } }, parameters: [{ name: "token", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "Price" }, "402": { description: "Payment required" } } } },
+      "/base/balance": { get: { operationId: "baseBalance", summary: "ETH and ERC-20 balances of a Base address", "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: D_USD } }, parameters: [{ name: "address", in: "query", required: true, schema: { type: "string" } }, { name: "tokens", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Balances" }, "402": { description: "Payment required" } } } },
       "/token-check/lite": {
         get: { operationId: "tokenCheckLite", summary: "Free verdict and risk codes", parameters: [{ name: "token", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "Lite verdict" }, "429": { description: "Daily free limit reached" } } },
       },
@@ -226,7 +231,7 @@ export function uygulamaKur(ay) {
     },
     "x-discovery": { ownershipProofs: [] },
   }));
-  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/token-check", ay.publicUrl + "/notarize", ay.publicUrl + "/lp-lock", ay.publicUrl + "/lp-watch"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
+  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/token-check", ay.publicUrl + "/base/gas", ay.publicUrl + "/base/price", ay.publicUrl + "/base/balance", ay.publicUrl + "/notarize", ay.publicUrl + "/lp-lock", ay.publicUrl + "/lp-watch"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
 
   app.get("/", async (c) => {
     return json(c, {
@@ -512,6 +517,58 @@ export function uygulamaKur(ay) {
       if (e.kullanici) return json(c, { error: e.message }, 400);
       return json(c, { error: "Could not read the chain right now." }, 503);
     }
+  });
+
+  // ───────── Base veri paketi: gas, fiyat, bakiye ($0.001; AGI sahiplerine günde 2000 ücretsiz) ─────────
+  const D_FIYAT = ay.dataPrice || "$0.001";
+  const D_USD = typeof D_FIYAT === "string" ? D_FIYAT.replace("$", "") : "0.001";
+  const D_GUN = Number(ay.holderDataDaily || 2000);
+  const odemeli = async (c, { kaynak, bazaar, uret, etiket }) => {
+    const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
+    const holder = c.req.header("AGI-HOLDER");
+    await hazirla();
+    const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: D_FIYAT, network: ay.network, maxTimeoutSeconds: 120 });
+    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, bazaar); return json(c, { ...pr, holderAccess: { header: "AGI-HOLDER", minimumAgi: String(H_MIN / 10n ** 18n), dailyLimit: D_GUN, docs: "https://agichainai.com/pages/agi.html" } }, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
+    if (!baslik && !holder) return odemeIste();
+    let sonuc;
+    try { sonuc = await uret(); }
+    catch (e) {
+      if (e.kullanici) return json(c, { error: e.message + "; nothing was charged." }, 400);
+      console.error(etiket + "_FAILED", String(e.shortMessage || e.message || e));
+      return json(c, { error: "Could not read the chain right now; nothing was charged." }, 503);
+    }
+    if (holder && !baslik) {
+      const h = await holderDogrula({ okur, kv: c.env?.WATCH_KV, agi: ay.adres.agi, minimum: H_MIN, gunluk: D_GUN, baslik: holder, onek: "d" });
+      if (!h.ok) return odemeIste(h.reason);
+      console.log("HOLDER_" + etiket, h.address);
+      return json(c, { ...sonuc, access: { type: "agi-holder", address: h.address, remainingToday: h.remaining } });
+    }
+    let yuk;
+    try { yuk = decodePaymentSignatureHeader(baslik); } catch { return odemeIste("invalid payment header"); }
+    const sart = sartlar.find((x) => x.scheme === yuk.accepted?.scheme && x.network === yuk.accepted?.network) || sartlar[0];
+    let dog;
+    try { dog = await sunucu.verifyPayment(yuk, sart, bazaar); } catch (e) { return odemeIste("verification failed: " + (e.message || e)); }
+    if (!dog.isValid) return odemeIste(dog.invalidReason || "payment invalid");
+    try { const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, undefined, bazaar); yuk.extensions = { ...(pr.extensions || {}), ...(yuk.extensions || {}) }; if (!yuk.resource) yuk.resource = pr.resource; } catch {}
+    let tahsil;
+    try { tahsil = await sunucu.settlePayment(yuk, sart, bazaar); } catch (e) { return odemeIste("settlement failed: " + (e.message || e)); }
+    if (!tahsil.success) return odemeIste(tahsil.errorReason || "settlement failed");
+    console.log("SETTLED_" + etiket, JSON.stringify({ tx: tahsil.transaction, payer: tahsil.payer || dog.payer }));
+    try { c.executionCtx.waitUntil(yakmaDene()); } catch { yakmaDene(); }
+    return json(c, { ...sonuc, payment: { payer: tahsil.payer || dog.payer, transaction: tahsil.transaction, network: tahsil.network } }, 200, { "PAYMENT-RESPONSE": encodePaymentResponseHeader(tahsil) });
+  };
+  const veriKaynak = (yol, aciklama, etiketler) => ({ url: ay.publicUrl + yol, description: aciklama + ` $${D_USD} USDC per call; free (${D_GUN}/day) for wallets holding ${H_MIN / 10n ** 18n} AGI via the AGI-HOLDER header.`, mimeType: "application/json", serviceName: "AGIChainAI Base Data", tags: ["base", "data", ...etiketler], iconUrl: "https://agichainai.com/assets/agi-token-256.png" });
+  const gasB = declareDiscoveryExtension({ input: {}, output: { example: { block: 38500000, baseFeeGwei: "0.006", priorityFeeGwei: "0.001", suggested: { standard: { maxFeePerGasGwei: "0.01", maxPriorityFeePerGasGwei: "0.001" } } } } });
+  const fiyatB = declareDiscoveryExtension({ input: { token: "0x532f27101965dd16442E59d40670FaF5eBB142E4" }, inputSchema: { properties: { token: { type: "string" } }, required: ["token"] }, output: { example: { priceUsd: 0.0123, source: { dex: "uniswap-v2", quote: "WETH", liquidityUsd: 152000 } } } });
+  const bakiyeB = declareDiscoveryExtension({ input: { address: "0x4200000000000000000000000000000000000006", tokens: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" }, inputSchema: { properties: { address: { type: "string" }, tokens: { type: "string", description: "comma-separated ERC-20 addresses (max 20)" } }, required: ["address"] }, output: { example: { eth: "0.42", tokens: [{ symbol: "USDC", balance: "12.5" }] } } });
+  app.get("/base/gas", (c) => odemeli(c, { etiket: "GAS", bazaar: gasB, kaynak: veriKaynak("/base/gas", "Live Base gas: base fee, priority fee and suggested slow/standard/fast EIP-1559 fees from the latest block.", ["gas", "fees"]), uret: () => gasBilgisi(okur) }));
+  app.get("/base/price", (c) => {
+    const t = String(c.req.query("token") || "");
+    return odemeli(c, { etiket: "PRICE", bazaar: fiyatB, kaynak: veriKaynak("/base/price", "USD price of any Base ERC-20 from its deepest Uniswap V2 / Aerodrome / AGIChainAI pool and the Chainlink ETH/USD feed, with the pool used and its liquidity.", ["price", "token"]), uret: async () => { if (!isAddress(t)) { const e = new Error("add ?token=0x… (ERC-20 address on Base)"); e.kullanici = true; throw e; } return fiyatBilgisi(okur, ay.lp, t); } });
+  });
+  app.get("/base/balance", (c) => {
+    const a = String(c.req.query("address") || ""), tk = String(c.req.query("tokens") || "").split(",").map((x) => x.trim()).filter(Boolean);
+    return odemeli(c, { etiket: "BALANCE", bazaar: bakiyeB, kaynak: veriKaynak("/base/balance", "ETH and ERC-20 balances of any Base address (up to 20 tokens per call), plus whether it is a contract.", ["balance", "wallet"]), uret: () => bakiyeBilgisi(okur, a, tk) });
   });
 
   // ───────── LP izleme (POST /lp-watch, 30 gün, webhook) ─────────

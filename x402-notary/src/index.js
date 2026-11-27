@@ -44,6 +44,8 @@ function kur(env, url) {
     holderMinAgi: env.HOLDER_MIN_AGI || "1000000",
     holderDaily: env.HOLDER_DAILY || "200",
     liteDaily: env.LITE_DAILY || "20",
+    dataPrice: env.DATA_PRICE || "$0.001",
+    holderDataDaily: env.HOLDER_DATA_DAILY || "2000",
     toolManifests: TOOL_MANIFESTS,
     publicUrl: env.PUBLIC_URL || new URL(url).origin,
   });

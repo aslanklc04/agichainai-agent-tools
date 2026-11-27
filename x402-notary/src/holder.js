@@ -21,7 +21,7 @@ export function holderBaslikCoz(deger) {
 /**
  * @returns {{ ok: true, address, balance, remaining } | { ok: false, reason }}
  */
-export async function holderDogrula({ okur, kv, agi, minimum, gunluk, baslik, simdiMs = Date.now() }) {
+export async function holderDogrula({ okur, kv, agi, minimum, gunluk, baslik, simdiMs = Date.now(), onek = "h" }) {
   const j = holderBaslikCoz(baslik);
   if (!j) return { ok: false, reason: "malformed AGI-HOLDER header" };
   const t = Date.parse(j.issuedAt);
@@ -35,7 +35,7 @@ export async function holderDogrula({ okur, kv, agi, minimum, gunluk, baslik, si
   let kalan = gunluk;
   if (kv) {
     const gun = new Date(simdiMs).toISOString().slice(0, 10);
-    const anahtar = `h:${adres.toLowerCase()}:${gun}`;
+    const anahtar = `${onek}:${adres.toLowerCase()}:${gun}`;
     const kullanilan = Number((await kv.get(anahtar)) || 0);
     if (kullanilan >= gunluk) return { ok: false, reason: `holder daily limit of ${gunluk} checks reached; resets at 00:00 UTC` };
     await kv.put(anahtar, String(kullanilan + 1), { expirationTtl: 2 * 86400 });
