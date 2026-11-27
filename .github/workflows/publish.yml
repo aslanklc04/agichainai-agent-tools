@@ -31,7 +31,7 @@ jobs:
       - run: npm ci
 
       - name: Check that the tools load
-        run: node -e "import('./src/viem.js').then(m => { const t = m.createViemAgiTools({}); if (t.length !== 13) process.exit(1); console.log(t.length + ' tools') })"
+        run: node -e "import('./src/viem.js').then(m => { const t = m.createViemAgiTools({}); if (t.length !== 15) process.exit(1); console.log(t.length + ' tools') })"
 
       - name: Publish package to npm (skipped if this version is already there)
         run: |

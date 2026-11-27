@@ -12,14 +12,15 @@ const INTENT = /\b(rug|rugpull|rug-pull|lock(ed)?|liquidity|lp|safe|safety|scam|
 const FREE_PAGE = "https://agichainai.com/exchange/lp-lock.html";
 
 let shared = null;
-function lpTool(runtime) {
-  if (shared?.runtime === runtime) return shared.tool;
+function tools(runtime) {
+  if (shared?.runtime === runtime) return shared.tools;
   const s = (k) => runtime.getSetting(k) || undefined;
   const limits = s("AGI_MAX_X402_USD") ? { maxX402Usd: s("AGI_MAX_X402_USD") } : {};
-  const tool = createViemAgiTools({ rpcUrl: s("AGI_RPC_URL"), privateKey: s("AGENT_PRIVATE_KEY"), limits }).find((t) => t.name === "agi_lp_lock_check");
-  shared = { runtime, tool };
-  return tool;
+  const t = createViemAgiTools({ rpcUrl: s("AGI_RPC_URL"), privateKey: s("AGENT_PRIVATE_KEY"), limits });
+  shared = { runtime, tools: Object.fromEntries(t.map((x) => [x.name, x])) };
+  return shared.tools;
 }
+const lpTool = (runtime) => tools(runtime).agi_lp_lock_check;
 
 const n = (x) => (x === null || x === undefined ? "–" : Number(x).toLocaleString("en-US", { maximumFractionDigits: 2 }));
 
@@ -79,9 +80,54 @@ export const checkLpLockAction = {
   ],
 };
 
-export const lpLockPlugin = {
-  name: "base-lp-lock",
-  description: "Pre-trade LP lock / rug-pull check for Base tokens (burned, locked with unlock dates, removable), paid per call over x402.",
-  actions: [checkLpLockAction],
+export function summarizeSafety(j) {
+  const lines = [`${j.token?.symbol || "Token"} (${j.token?.address}) on Base — ${j.verdict}${j.score !== undefined ? ` (score ${j.score}/100)` : ""}`];
+  if (j.summary) lines.push(j.summary);
+  const sim = j.simulation;
+  if (sim?.simulated) lines.push(`Simulation: buy ${sim.buyOk ? "ok" : "FAILED"}, sell ${sim.sellOk ? "ok" : "FAILED"}; tax buy ${n(sim.buyTaxPct)}% / sell ${n(sim.sellTaxPct)}% / transfer ${n(sim.transferTaxPct)}%`);
+  for (const r of (j.risks || []).slice(0, 8)) lines.push(typeof r === "string" ? "• " + r : `• [${r.level}] ${r.code}: ${r.detail}`);
+  if (j.full) lines.push(`Full report: ${j.full} (${j.fullPrice}, or free for wallets holding 1,000,000 AGI)`);
+  if (j.access?.type === "agi-holder") lines.push("Free check (AGI holder).");
+  else if (j.payment?.transaction) lines.push(`Paid ${j.paidUsdc || "0.01"} USDC · tx ${j.payment.transaction}`);
+  lines.push("Heuristic on-chain check, not an audit or financial advice.");
+  return lines.join("\n");
+}
+
+export const checkTokenSafetyAction = {
+  name: "CHECK_TOKEN_SAFETY",
+  similes: ["TOKEN_SAFETY_CHECK", "HONEYPOT_CHECK", "CAN_I_SELL_THIS", "IS_THIS_TOKEN_SAFE", "PRE_TRADE_CHECK"],
+  description:
+    "Before buying or accepting a Base ERC-20, run a pre-trade safety check: buy/transfer/sell simulation (honeypot and taxes), owner powers (mint, blacklist, pause, fee change), proxy, and LP lock. Verdict SAFE / CAUTION / DANGER. Free lite verdict without a wallet; full report free for wallets holding 1,000,000 AGI, otherwise $0.01 USDC over x402.",
+  validate: async (_runtime, message) => {
+    const t = message?.content?.text || "";
+    return ADDRESS.test(t) && /\b(safe|safety|honeypot|scam|rug|tax|sell|buy|legit|check|audit)\b/i.test(t);
+  },
+  handler: async (runtime, message, _state, _options, callback) => {
+    const token = (message?.content?.text || "").match(ADDRESS)?.[0];
+    try {
+      const t = tools(runtime);
+      const j = runtime.getSetting("AGENT_PRIVATE_KEY") ? await t.agi_token_check.run({ token }) : await t.agi_token_check_lite.run({ token });
+      const text = summarizeSafety(j);
+      await callback?.({ text, actions: ["CHECK_TOKEN_SAFETY"] });
+      return { success: true, text, data: j };
+    } catch (e) {
+      const text = `Token safety check failed: ${e.shortMessage || e.message}`;
+      await callback?.({ text });
+      return { success: false, text, error: text };
+    }
+  },
+  examples: [
+    [
+      { name: "{{user1}}", content: { text: "is 0x532f27101965dd16442E59d40670FaF5eBB142E4 a honeypot? can I sell it?" } },
+      { name: "{{agent}}", content: { text: "Simulating a buy and sell on Base…", actions: ["CHECK_TOKEN_SAFETY"] } },
+    ],
+  ],
 };
+
+export const lpLockPlugin = {
+  name: "base-token-safety",
+  description: "Pre-trade safety for Base tokens: honeypot/tax simulation, owner powers, LP lock (burned, locked with unlock dates, removable). Free lite verdict; full report via x402 or free for AGI holders.",
+  actions: [checkTokenSafetyAction, checkLpLockAction],
+};
+export const tokenSafetyPlugin = lpLockPlugin;
 export default lpLockPlugin;

@@ -30,7 +30,7 @@ function sahte(d) {
 
 test("elizaOS action triggers only on address + intent, and pays", async () => {
   const { checkLpLockAction, lpLockPlugin } = await import("../src/lp-lock-eliza.js");
-  assert.equal(lpLockPlugin.actions.length, 1);
+  assert.equal(lpLockPlugin.actions.length, 2);
   const rt = (k) => ({ getSetting: (x) => k[x] });
   const m = (text) => ({ content: { text } });
   assert.equal(await checkLpLockAction.validate(rt({}), m(`rug check ${TOKEN}`)), true);
@@ -53,13 +53,35 @@ test("AgentKit check_lp_lock pays through the wallet provider", async () => {
   const p = lpLockActionProvider();
   const wp = { getName: () => "mock", getNetwork: () => ({ chainId: "8453" }), getAddress: () => acct.address, signTypedData: (td) => acct.signTypedData(td), readContract: async () => { throw new Error("no rpc"); } };
   const acts = p.getActions(wp);
-  assert.equal(acts.length, 1); assert.equal(acts[0].name.endsWith("check_lp_lock"), true);
+  assert.equal(acts.length, 2); const lpAct = acts.find((a) => a.name.endsWith("check_lp_lock")); assert.ok(lpAct);
   const d = {}; const eski = globalThis.fetch; globalThis.fetch = sahte(d);
   try {
-    const s = await acts[0].invoke({ token: TOKEN });
+    const s = await lpAct.invoke({ token: TOKEN });
     const j = JSON.parse(s);
     assert.equal(j.verdict, "LOCKED_OR_BURNED"); assert.equal(j.paidUsdc, "0.01"); assert.equal(d.ok, true);
     const wrong = lpLockActionProvider().getActions({ ...wp, getNetwork: () => ({ chainId: "1" }) });
-    assert.match(await wrong[0].invoke({ token: TOKEN }), /Base mainnet/);
+    assert.match(await wrong.find((a) => a.name.endsWith("check_lp_lock")).invoke({ token: TOKEN }), /Base mainnet/);
   } finally { globalThis.fetch = eski; }
+});
+
+test("agi_token_check: AGI holder gets a free check via signed header, others pay", async () => {
+  const { createAgiTools, BASE_MAINNET: B } = await import("../src/core.js");
+  const calls = [];
+  const fakeFetch = async (url, init = {}) => {
+    const h = new Headers(init.headers || (typeof url === "object" ? url.headers : undefined));
+    calls.push({ url: String(url), holder: h.get("AGI-HOLDER"), pay: h.get("PAYMENT-SIGNATURE") || h.get("X-PAYMENT") });
+    if (h.get("AGI-HOLDER")) {
+      const j = JSON.parse(atob(h.get("AGI-HOLDER")));
+      const { verifyMessage } = await import("viem");
+      const valid = await verifyMessage({ address: j.address, message: `AGIChainAI holder access\nAddress: ${j.address}\nIssued: ${j.issuedAt}`, signature: j.signature });
+      return new Response(JSON.stringify(valid ? { verdict: "SAFE", access: { type: "agi-holder" } } : { error: "bad" }), { status: valid ? 200 : 402 });
+    }
+    return sahte({})(url, init);
+  };
+  const mk = (bal) => createAgiTools({ fetch: fakeFetch, read: async (p) => (p.functionName === "balanceOf" ? bal : 0n), account: async () => acct.address, signTypedData: (td) => acct.signTypedData(td), signMessage: (m) => acct.signMessage({ message: m }), send: async () => { throw new Error("no"); } }).find((t) => t.name === "agi_token_check");
+  const zengin = await mk(2_000_000n * 10n ** 18n).run({ token: TOKEN });
+  assert.equal(zengin.access.type, "agi-holder"); assert.equal(zengin.paidUsdc, "0");
+  calls.length = 0;
+  const fakir = await mk(10n).run({ token: TOKEN });
+  assert.equal(fakir.paidUsdc, "0.01"); assert.ok(calls.some((c) => c.pay)); assert.ok(!calls.some((c) => c.holder));
 });

@@ -10,6 +10,16 @@ Lets AI agents use the **AGI token on Base mainnet**. One shared set of 13 tools
 | Coinbase AgentKit | `import { agiActionProvider } from "agichainai-agent-tools/agentkit"` |
 | elizaOS | `import { agiPlugin } from "agichainai-agent-tools/eliza"` |
 
+## Pre-trade token safety check (honeypot, taxes, owner powers, LP)
+
+`agi_token_check` simulates buy → wallet transfer → sell against the token's real Base pool (inside an `eth_call`, nothing is sent), so honeypots and buy/sell/transfer taxes show up as measured numbers. It also flags owner powers (mint, blacklist, pause, fee change, trading switch), upgradeable proxies and removable liquidity, and returns **SAFE / CAUTION / DANGER / UNVERIFIED** with a 0-100 score.
+
+- **Free for AGI holders:** if the agent's wallet holds at least **1,000,000 AGI**, the tool signs an `AGI-HOLDER` header and the check costs nothing (up to 200 a day).
+- Otherwise **$0.01 USDC** on Base over x402 (gasless signature).
+- `agi_token_check_lite` is free with no wallet: verdict, score and risk codes.
+
+elizaOS: the plugin below now also has `CHECK_TOKEN_SAFETY` (lite verdict without a key, full report with one). AgentKit: `lpLockActionProvider()` adds `check_token_safety`. Raw HTTP: `GET https://agichainai-notary.aslanklc04.workers.dev/token-check?token=0x…`.
+
 ## Pre-trade LP lock check (rug-pull guard)
 
 Before your agent buys or accepts a Base token, check whether the liquidity can be pulled. One call returns, for every Uniswap V2, Aerodrome and AGIChainAI pool, the LP share **burned**, **locked** (UNCX, Team Finance, AGIChainAI lock, with unlock dates) and still **removable**, plus a verdict and `rugRisk`. **$0.01 USDC on Base per call over x402** — a gasless signature from the agent's wallet, no account, no API key. Nothing is charged for an invalid token.

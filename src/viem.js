@@ -25,6 +25,7 @@ export function createViemAgiTools({ rpcUrl, privateKey, addresses, limits, chai
     getEthBalance: (a) => pub.getBalance({ address: a }),
     account: acct ? async () => acct.address : undefined,
     signTypedData: wallet ? (td) => wallet.signTypedData({ account: acct, ...td }) : undefined,
+    signMessage: wallet ? (message) => wallet.signMessage({ account: acct, message }) : undefined,
     send: wallet ? async (tx) => {
       await checkChain();
       const hash = await wallet.sendTransaction({ to: tx.to, data: tx.data, value: tx.value ?? 0n });

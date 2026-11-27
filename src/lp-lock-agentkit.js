@@ -15,17 +15,32 @@ export function lpLockActionProvider({ maxX402Usd } = {}) {
     const net = wp.getNetwork?.();
     if (net?.chainId && String(net.chainId) !== "8453") throw new Error(`LP lock check pays on Base mainnet; wallet is on chain ${net.chainId}`);
     if (!wp.signTypedData) throw new Error("This wallet provider cannot sign EIP-712 typed data, which x402 payments need.");
-    const tool = createAgiTools({
+    const all = createAgiTools({
       limits,
       read: (p) => wp.readContract(p),
       account: async () => wp.getAddress(),
       signTypedData: (td) => wp.signTypedData(td),
+      signMessage: wp.signMessage ? (m) => wp.signMessage(m) : undefined,
       send: async () => { throw new Error("not used"); },
-    }).find((t) => t.name === "agi_lp_lock_check");
+    });
+    const tool = Object.fromEntries(all.map((t) => [t.name, t]));
     cache.set(wp, tool);
     return tool;
   };
   return customActionProvider([
+    {
+      name: "check_token_safety",
+      description:
+        "Pre-trade safety check before buying or accepting a Base ERC-20: simulates buy → wallet transfer → sell against the real pool (honeypot, buy/sell/transfer tax), detects owner powers (mint, blacklist, pause, fee change, trading switch) and upgradeable proxies, and checks whether LP is burned, locked or removable. Returns verdict SAFE / CAUTION / DANGER / UNVERIFIED, a 0-100 score and the risks. Free if the wallet holds at least 1,000,000 AGI (signed holder header); otherwise $0.01 USDC on Base over x402 (signature only, no gas).",
+      schema: z.object({ token: z.string().describe("ERC-20 token address on Base (0x…)") }),
+      invoke: async (walletProvider, { token }) => {
+        try {
+          return JSON.stringify(await toolFor(walletProvider).agi_token_check.run({ token }));
+        } catch (e) {
+          return "Error: " + (e.shortMessage || e.message);
+        }
+      },
+    },
     {
       name: "check_lp_lock",
       description:
@@ -33,7 +48,7 @@ export function lpLockActionProvider({ maxX402Usd } = {}) {
       schema: z.object({ token: z.string().describe("ERC-20 token address on Base (0x…)") }),
       invoke: async (walletProvider, { token }) => {
         try {
-          return JSON.stringify(await toolFor(walletProvider).run({ token }));
+          return JSON.stringify(await toolFor(walletProvider).agi_lp_lock_check.run({ token }));
         } catch (e) {
           return "Error: " + (e.shortMessage || e.message);
         }
