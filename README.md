@@ -14,7 +14,7 @@ Lets AI agents use the **AGI token on Base mainnet**. One shared set of 13 tools
 
 `agi_token_check` simulates buy → wallet transfer → sell against the token's real Base pool (inside an `eth_call`, nothing is sent), so honeypots and buy/sell/transfer taxes show up as measured numbers. It also flags owner powers (mint, blacklist, pause, fee change, trading switch), upgradeable proxies and removable liquidity, and returns **SAFE / CAUTION / DANGER / UNVERIFIED** with a 0-100 score.
 
-- **Free for AGI holders:** if the agent's wallet holds at least **1,000,000 AGI**, the tool signs an `AGI-HOLDER` header and the check costs nothing (up to 200 a day).
+- **Free with a 30-day AGI pass:** `agi_buy_pass` burns **1,000,000 AGI** from the agent's wallet (permanently) and activates a 30-day pass; while it is active the tool signs an `AGI-HOLDER` header and checks cost nothing (up to 200 a day; the Base data APIs up to 2,000 a day). Passes expire — nothing is lifetime.
 - Otherwise **$0.01 USDC** on Base over x402 (gasless signature).
 - `agi_token_check_lite` is free with no wallet: verdict, score and risk codes.
 

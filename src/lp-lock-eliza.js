@@ -86,7 +86,7 @@ export function summarizeSafety(j) {
   const sim = j.simulation;
   if (sim?.simulated) lines.push(`Simulation: buy ${sim.buyOk ? "ok" : "FAILED"}, sell ${sim.sellOk ? "ok" : "FAILED"}; tax buy ${n(sim.buyTaxPct)}% / sell ${n(sim.sellTaxPct)}% / transfer ${n(sim.transferTaxPct)}%`);
   for (const r of (j.risks || []).slice(0, 8)) lines.push(typeof r === "string" ? "• " + r : `• [${r.level}] ${r.code}: ${r.detail}`);
-  if (j.full) lines.push(`Full report: ${j.full} (${j.fullPrice}, or free for wallets holding 1,000,000 AGI)`);
+  if (j.full) lines.push(`Full report: ${j.full} (${j.fullPrice}, or free with a 30-day AGI pass)`);
   if (j.access?.type === "agi-holder") lines.push("Free check (AGI holder).");
   else if (j.payment?.transaction) lines.push(`Paid ${j.paidUsdc || "0.01"} USDC · tx ${j.payment.transaction}`);
   lines.push("Heuristic on-chain check, not an audit or financial advice.");
@@ -97,7 +97,7 @@ export const checkTokenSafetyAction = {
   name: "CHECK_TOKEN_SAFETY",
   similes: ["TOKEN_SAFETY_CHECK", "HONEYPOT_CHECK", "CAN_I_SELL_THIS", "IS_THIS_TOKEN_SAFE", "PRE_TRADE_CHECK"],
   description:
-    "Before buying or accepting a Base ERC-20, run a pre-trade safety check: buy/transfer/sell simulation (honeypot and taxes), owner powers (mint, blacklist, pause, fee change), proxy, and LP lock. Verdict SAFE / CAUTION / DANGER. Free lite verdict without a wallet; full report free for wallets holding 1,000,000 AGI, otherwise $0.01 USDC over x402.",
+    "Before buying or accepting a Base ERC-20, run a pre-trade safety check: buy/transfer/sell simulation (honeypot and taxes), owner powers (mint, blacklist, pause, fee change), proxy, and LP lock. Verdict SAFE / CAUTION / DANGER. Free lite verdict without a wallet; full report free with a 30-day AGI pass, otherwise $0.01 USDC over x402.",
   validate: async (_runtime, message) => {
     const t = message?.content?.text || "";
     return ADDRESS.test(t) && /\b(safe|safety|honeypot|scam|rug|tax|sell|buy|legit|check|audit)\b/i.test(t);

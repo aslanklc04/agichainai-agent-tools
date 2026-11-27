@@ -31,7 +31,7 @@ export function lpLockActionProvider({ maxX402Usd } = {}) {
     {
       name: "check_token_safety",
       description:
-        "Pre-trade safety check before buying or accepting a Base ERC-20: simulates buy → wallet transfer → sell against the real pool (honeypot, buy/sell/transfer tax), detects owner powers (mint, blacklist, pause, fee change, trading switch) and upgradeable proxies, and checks whether LP is burned, locked or removable. Returns verdict SAFE / CAUTION / DANGER / UNVERIFIED, a 0-100 score and the risks. Free if the wallet holds at least 1,000,000 AGI (signed holder header); otherwise $0.01 USDC on Base over x402 (signature only, no gas).",
+        "Pre-trade safety check before buying or accepting a Base ERC-20: simulates buy → wallet transfer → sell against the real pool (honeypot, buy/sell/transfer tax), detects owner powers (mint, blacklist, pause, fee change, trading switch) and upgradeable proxies, and checks whether LP is burned, locked or removable. Returns verdict SAFE / CAUTION / DANGER / UNVERIFIED, a 0-100 score and the risks. Free with an active 30-day AGI pass (burn 1,000,000 AGI; signed holder header); otherwise $0.01 USDC on Base over x402 (signature only, no gas).",
       schema: z.object({ token: z.string().describe("ERC-20 token address on Base (0x…)") }),
       invoke: async (walletProvider, { token }) => {
         try {

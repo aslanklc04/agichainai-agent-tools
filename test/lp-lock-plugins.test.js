@@ -64,12 +64,14 @@ test("AgentKit check_lp_lock pays through the wallet provider", async () => {
   } finally { globalThis.fetch = eski; }
 });
 
-test("agi_token_check: AGI holder gets a free check via signed header, others pay", async () => {
+test("agi_token_check: an active AGI pass gets a free check via signed header; no pass pays (holding alone is not enough)", async () => {
   const { createAgiTools, BASE_MAINNET: B } = await import("../src/core.js");
   const calls = [];
+  let passActive = true;
   const fakeFetch = async (url, init = {}) => {
     const h = new Headers(init.headers || (typeof url === "object" ? url.headers : undefined));
     calls.push({ url: String(url), holder: h.get("AGI-HOLDER"), pay: h.get("PAYMENT-SIGNATURE") || h.get("X-PAYMENT") });
+    if (String(url).includes("/pass/")) return new Response(JSON.stringify({ active: passActive }), { status: 200 });
     if (h.get("AGI-HOLDER")) {
       const j = JSON.parse(atob(h.get("AGI-HOLDER")));
       const { verifyMessage } = await import("viem");
@@ -79,9 +81,9 @@ test("agi_token_check: AGI holder gets a free check via signed header, others pa
     return sahte({})(url, init);
   };
   const mk = (bal) => createAgiTools({ fetch: fakeFetch, read: async (p) => (p.functionName === "balanceOf" ? bal : 0n), account: async () => acct.address, signTypedData: (td) => acct.signTypedData(td), signMessage: (m) => acct.signMessage({ message: m }), send: async () => { throw new Error("no"); } }).find((t) => t.name === "agi_token_check");
-  const zengin = await mk(2_000_000n * 10n ** 18n).run({ token: TOKEN });
+  const zengin = await mk(0n).run({ token: TOKEN });
   assert.equal(zengin.access.type, "agi-holder"); assert.equal(zengin.paidUsdc, "0");
-  calls.length = 0;
-  const fakir = await mk(10n).run({ token: TOKEN });
+  calls.length = 0; passActive = false;
+  const fakir = await mk(10n ** 30n).run({ token: TOKEN });
   assert.equal(fakir.paidUsdc, "0.01"); assert.ok(calls.some((c) => c.pay)); assert.ok(!calls.some((c) => c.holder));
 });

@@ -1,6 +1,6 @@
 {
   "name": "agichainai-agent-tools",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Pre-trade token safety for Base (honeypot/tax simulation, owner powers, LP lock) for elizaOS, Coinbase AgentKit and MCP \u2014 free for AGI holders, otherwise paid per call over x402 \u2014 plus AGI token tools: price, buy/sell, notary, tasks, agent directory.",
   "main": "src/core.js",
   "scripts": {
