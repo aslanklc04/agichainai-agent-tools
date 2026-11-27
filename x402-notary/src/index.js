@@ -40,6 +40,10 @@ function kur(env, url) {
     lp: BASE_LP,
     lpPrice: env.LP_PRICE || "$0.01",
     watchPrice: env.WATCH_PRICE || "$0.05",
+    tokenCheckPrice: env.TOKEN_CHECK_PRICE || "$0.01",
+    holderMinAgi: env.HOLDER_MIN_AGI || "1000000",
+    holderDaily: env.HOLDER_DAILY || "200",
+    liteDaily: env.LITE_DAILY || "20",
     toolManifests: TOOL_MANIFESTS,
     publicUrl: env.PUBLIC_URL || new URL(url).origin,
   });

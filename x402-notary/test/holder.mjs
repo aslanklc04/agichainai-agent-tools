@@ -1,0 +1,25 @@
+// AGI sahibi erişimi: imza, bakiye eşiği, süre ve günlük limit.
+import assert from "node:assert";
+import fs from "node:fs";
+import { createPublicClient, createWalletClient, http, defineChain, parseAbi } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { holderDogrula, HOLDER_MESAJ } from "../src/holder.js";
+const RPC = "http://127.0.0.1:8545";
+const chain = defineChain({ id: 31337, name: "hh", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [RPC] } } });
+const zengin = privateKeyToAccount("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
+const fakir = privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
+const okur = createPublicClient({ chain, transport: http(RPC) });
+const w = createWalletClient({ account: zengin, chain, transport: http(RPC) });
+const a = JSON.parse(fs.readFileSync("/home/claude/dex/artifacts/contracts/token/GuvenliToken.sol/GuvenliToken.json"));
+const agi = (await okur.waitForTransactionReceipt({ hash: await w.deployContract({ abi: a.abi, bytecode: a.bytecode, args: ["AGI", "AGI", 1_000_000_000n] }) })).contractAddress;
+const kvm = new Map(); const kv = { get: async (k) => kvm.get(k) ?? null, put: async (k, v) => kvm.set(k, v) };
+const baslik = async (hesap, zaman = new Date().toISOString(), adres = hesap.address) => btoa(JSON.stringify({ address: adres, issuedAt: zaman, signature: await hesap.signMessage({ message: HOLDER_MESAJ(adres, zaman) }) }));
+const ort = { okur, kv, agi, minimum: 1_000_000n * 10n ** 18n, gunluk: 2 };
+let r = await holderDogrula({ ...ort, baslik: await baslik(zengin) }); assert.equal(r.ok, true, r.reason); assert.equal(r.remaining, 1);
+r = await holderDogrula({ ...ort, baslik: await baslik(zengin) }); assert.equal(r.ok, true); assert.equal(r.remaining, 0);
+r = await holderDogrula({ ...ort, baslik: await baslik(zengin) }); assert.equal(r.ok, false); assert.match(r.reason, /daily limit/);
+r = await holderDogrula({ ...ort, baslik: await baslik(fakir) }); assert.equal(r.ok, false); assert.match(r.reason, /at least 1000000 AGI/);
+r = await holderDogrula({ ...ort, baslik: await baslik(fakir, undefined, zengin.address) }); assert.equal(r.ok, false); assert.match(r.reason, /does not match/);
+r = await holderDogrula({ ...ort, baslik: await baslik(zengin, new Date(Date.now() - 3600_000).toISOString()) }); assert.equal(r.ok, false); assert.match(r.reason, /expired/);
+r = await holderDogrula({ ...ort, baslik: "garbage" }); assert.equal(r.ok, false);
+console.log("holder: 7/7");
