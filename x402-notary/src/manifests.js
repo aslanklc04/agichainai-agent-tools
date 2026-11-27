@@ -7,6 +7,34 @@ const USDC = "eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 const TIP = "https://ercs.ethereum.org/ERCS/erc-8257#tool-manifest-v1";
 
 export const TOOL_MANIFESTS = {
+  "base-token-check": {
+    type: TIP,
+    name: "Base Token Check",
+    description:
+      "Pre-trade safety check for a Base ERC-20: simulates buy, wallet transfer and sell against the real pool (honeypot, taxes), flags owner powers (mint, blacklist, pause, fee change), proxies and removable LP. Verdict SAFE/CAUTION/DANGER, 0-100 score. Free for wallets holding 1M AGI.",
+    endpoint: KOK + "/token-check",
+    inputs: {
+      type: "object",
+      properties: { token: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$", description: "ERC-20 token address on Base" } },
+      required: ["token"],
+    },
+    outputs: {
+      type: "object",
+      properties: {
+        verdict: { type: "string", description: "SAFE, CAUTION, DANGER or UNVERIFIED" },
+        score: { type: "number" },
+        risks: { type: "array" },
+        simulation: { type: "object", description: "buyOk, sellOk, buyTaxPct, sellTaxPct, transferTaxPct" },
+        owner: { type: "object" },
+        liquidity: { type: "object" },
+      },
+    },
+    version: "1.0.0",
+    image: "https://agichainai.com/assets/agi-token-256.png",
+    tags: ["security", "trading", "defi", "honeypot", "token-safety", "pre-trade", "base"],
+    pricing: [{ amount: "10000", asset: USDC, recipient: ODEME, protocol: "x402" }],
+    creatorAddress: OLUSTURAN,
+  },
   "base-lp-lock-check": {
     type: TIP,
     name: "Base LP Lock Check",
