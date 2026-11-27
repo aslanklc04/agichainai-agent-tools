@@ -520,7 +520,7 @@ export function uygulamaKur(ay) {
     if (!s.ok) return json(c, { error: `free lite limit of ${LITE_GUN} per day reached; use /token-check ($${TC_USD}) or hold AGI for free access` }, 429);
     try {
       const a = await tokenKontrol(okur, ay.lp, token);
-      return json(c, { token: a.token, verdict: a.verdict, score: a.score, risks: a.risks.map((r) => r.code), honeypot: a.simulation.simulated ? !a.simulation.sellOk : null, sellTaxPct: a.simulation.sellTaxPct ?? null, rugRisk: a.liquidity.rugRisk, full: ay.publicUrl + "/token-check?token=" + a.token, fullPrice: "$" + TC_USD, holderAccess: `free full checks (${H_GUN}/day) with a ${GECIS_GUN}-day AGI pass: burn ${H_MIN / 10n ** 18n} AGI and POST the tx to /pass/activate`, remainingToday: s.remaining });
+      return json(c, { token: a.token, verdict: a.verdict, score: a.score, risks: a.risks.map((r) => r.code), honeypot: a.simulation.simulated ? !a.simulation.sellOk : null, sellTaxPct: a.simulation.sellTaxPct ?? null, rugRisk: a.liquidity.rugRisk, full: ay.publicUrl + "/token-check?token=" + (a.token?.address || a.token), fullPrice: "$" + TC_USD, holderAccess: `free full checks (${H_GUN}/day) with a ${GECIS_GUN}-day AGI pass: burn ${H_MIN / 10n ** 18n} AGI and POST the tx to /pass/activate`, remainingToday: s.remaining });
     } catch (e) {
       if (e.kullanici) return json(c, { error: e.message }, 400);
       return json(c, { error: "Could not read the chain right now." }, 503);
@@ -660,11 +660,19 @@ export function uygulamaKur(ay) {
     return { tokenler: tl, sonBlok: k.sonBlok, olcum: o };
   };
   const xRapor = (cuzdan, r) => {
-    const held = r.olcum.positions.filter((p) => p.held);
-    const riskli = held.filter((p) => p.sellable === false || (p.sellTaxPct ?? 0) > 10 || (p.exitLossPct ?? 0) > 20 || p.rugRisk === "HIGH");
+    const held = r.olcum.positions.filter((p) => p.held).map((p) => {
+      // Token riski (dolandırıcılık işaretleri) ile pozisyon büyüklüğünden doğan sığ likidite ayrı tutulur.
+      const flags = [];
+      if (p.sellable === false) flags.push("SELL_BLOCKED");
+      if ((p.sellTaxPct ?? 0) > 10) flags.push("HIGH_SELL_TAX");
+      if (p.rugRisk === "HIGH" || p.rugRisk === "NO_LIQUIDITY") flags.push("LIQUIDITY_REMOVABLE");
+      if (p.sellable && (p.exitLossPct ?? 0) > 20) flags.push("LOW_EXIT_LIQUIDITY");
+      return { ...p, flags };
+    });
+    const tokenRiski = (p) => p.flags.some((f) => f !== "LOW_EXIT_LIQUIDITY");
     return {
       wallet: getAddress(cuzdan),
-      summary: { positions: held.length, sellable: held.filter((p) => p.sellable).length, blocked: held.filter((p) => p.sellable === false).length, atRisk: riskli.length, exitValueEth: Math.round(held.reduce((a, p) => a + (p.exitValueEth || 0), 0) * 1e8) / 1e8, exitValueUsd: r.olcum.ethUsd ? Math.round(held.reduce((a, p) => a + (p.exitValueEth || 0), 0) * r.olcum.ethUsd * 100) / 100 : null },
+      summary: { positions: held.length, sellable: held.filter((p) => p.sellable).length, blocked: held.filter((p) => p.sellable === false).length, tokenRisk: held.filter(tokenRiski).length, lowExitLiquidity: held.filter((p) => p.flags.includes("LOW_EXIT_LIQUIDITY")).length, exitValueEth: Math.round(held.reduce((a, p) => a + (p.exitValueEth || 0), 0) * 1e8) / 1e8, exitValueUsd: r.olcum.ethUsd ? Math.round(held.reduce((a, p) => a + (p.exitValueEth || 0), 0) * r.olcum.ethUsd * 100) / 100 : null },
       positions: held.map(({ lp, gecici, measurable, held: _h, ...p }) => p),
       notHeldOrUnmeasurable: r.olcum.positions.filter((p) => !p.held).map((p) => ({ token: p.token, symbol: p.symbol, reason: p.reason || (p.measurable === false ? "unmeasurable" : p.error || "zero balance") })),
       tokensScanned: r.tokenler.length,
@@ -672,7 +680,7 @@ export function uygulamaKur(ay) {
       checkedAt: new Date().toISOString(),
     };
   };
-  const X_ORNEK = { wallet: "0x…", summary: { positions: 3, sellable: 2, blocked: 1, atRisk: 1, exitValueEth: 0.41, exitValueUsd: 1230.5 }, positions: [{ token: "0x…", symbol: "MEME", balance: "1250000", sellable: true, sellTaxPct: 0, priceImpactPct: 2.1, exitLossPct: 2.4, exitValueEth: 0.4, exitValueUsd: 1200, rugRisk: "LOW" }, { token: "0x…", symbol: "TRAP", sellable: false, error: "transfer: BLOCKED", rugRisk: "HIGH" }] };
+  const X_ORNEK = { wallet: "0x…", summary: { positions: 3, sellable: 2, blocked: 1, tokenRisk: 1, lowExitLiquidity: 0, exitValueEth: 0.41, exitValueUsd: 1230.5 }, positions: [{ token: "0x…", symbol: "MEME", balance: "1250000", sellable: true, sellTaxPct: 0, priceImpactPct: 2.1, exitLossPct: 2.4, exitValueEth: 0.4, exitValueUsd: 1200, rugRisk: "LOW" }, { token: "0x…", symbol: "TRAP", sellable: false, error: "transfer: BLOCKED", rugRisk: "HIGH" }] };
   const xBazaar = declareDiscoveryExtension({ input: { wallet: "0x0000000000000000000000000000000000000001", tokens: "0x532f27101965dd16442E59d40670FaF5eBB142E4" }, inputSchema: { properties: { wallet: { type: "string", description: "Base wallet that holds the tokens" }, tokens: { type: "string", description: "optional comma-separated token addresses (max 20); recent incoming tokens are found automatically" } }, required: ["wallet"] }, output: { example: X_ORNEK } });
   const xKaynak = () => ({ url: ay.publicUrl + "/exit-check", description: `Can your agent still get out? For every token a Base wallet holds, simulates selling the FULL balance from that wallet (catches blacklists, wallet-specific taxes and taxes raised after you bought) and returns sellable / sell tax / price impact / what you would receive, plus LP rug risk. $${X_USD} USDC per wallet check, no API key. Nothing is charged if the chain cannot be read.`, mimeType: "application/json", serviceName: "AGIChainAI Exit Guard", tags: ["exit", "honeypot", "rug-pull", "portfolio", "positions", "base", "trading-bot", "token-safety"], iconUrl: "https://agichainai.com/assets/agi-token-256.png" });
   app.get("/exit-check", (c) => odemeli(c, { etiket: "EXIT_CHECK", fiyat: X_FIYAT, gunluk: 100, onek: "x", bazaar: xBazaar, kaynak: xKaynak(), uret: async () => { const cz = String(c.req.query("wallet") || ""); return xRapor(cz, await cuzdanKontrol(cz, c.req.query("tokens"))); } }));
@@ -685,7 +693,7 @@ export function uygulamaKur(ay) {
     if (!s.ok) return json(c, { error: `free lite limit reached; full report: ${ay.publicUrl}/exit-check ($${X_USD})` }, 429);
     try {
       const r = xRapor(cz, await cuzdanKontrol(cz, c.req.query("tokens")));
-      return json(c, { wallet: r.wallet, summary: r.summary, blockedOrRisky: r.positions.filter((p) => p.sellable === false || (p.sellTaxPct ?? 0) > 10 || (p.exitLossPct ?? 0) > 20 || p.rugRisk === "HIGH").map((p) => p.symbol || p.token), full: `${ay.publicUrl}/exit-check?wallet=${r.wallet} ($${X_USD}: per-position tax, impact, exit value)`, guard: `POST ${ay.publicUrl}/exit-guard ($${G_USD} for ${GUARD_GUN} days of webhook alerts)`, remainingToday: s.remaining, checkedAt: r.checkedAt });
+      return json(c, { wallet: r.wallet, summary: r.summary, tokenRisk: r.positions.filter((p) => p.flags.some((f) => f !== "LOW_EXIT_LIQUIDITY")).map((p) => ({ token: p.symbol || p.token, flags: p.flags })), lowExitLiquidity: r.positions.filter((p) => p.flags.includes("LOW_EXIT_LIQUIDITY")).map((p) => ({ token: p.symbol || p.token, exitLossPct: p.exitLossPct, note: "your position is large relative to the pool; selling it all at once loses value to price impact (not a scam signal)" })), full: `${ay.publicUrl}/exit-check?wallet=${r.wallet} ($${X_USD}: per-position tax, impact, exit value)`, guard: `POST ${ay.publicUrl}/exit-guard ($${G_USD} for ${GUARD_GUN} days of webhook alerts)`, remainingToday: s.remaining, checkedAt: r.checkedAt });
     } catch (e) {
       if (e.kullanici) return json(c, { error: e.message }, 400);
       return json(c, { error: "Could not read the chain right now." }, 503);
