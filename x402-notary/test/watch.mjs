@@ -53,3 +53,16 @@ assert.equal((await tara(T0 + 31 * 86400)).bitti, 1); assert.equal(await izlemeO
   assert.equal(r.hata, 1); assert.equal(g2.length, 2);
 }
 console.log("watch: all ok");
+
+// Havuz kaybolursa (okuma hatası) olay üretilmez.
+{
+  const { izlemeleriTara: tara2, izlemeEkle: ekle2 } = await import("../src/watch.js");
+  const m = new Map(); const kv2 = { get: async (k) => m.get(k) ?? null, put: async (k, v) => { m.set(k, v); }, delete: async (k) => { m.delete(k); }, list: async ({ prefix }) => ({ keys: [...m.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) };
+  const iyi = { verdict: "LOCKED_OR_BURNED", rugRisk: "LOW", protectedPctWeightedByLiquidity: 99.9, liquidityUsd: { v2Style: 34, v3: 0.06 }, v2Pools: [{ pair: "0xP1", lp: { lockers: [] } }] };
+  const kotu = { verdict: "MAIN_LIQUIDITY_IN_V3", rugRisk: "NOT_ASSESSED", protectedPctWeightedByLiquidity: null, liquidityUsd: { v2Style: 0, v3: 0.06 }, v2Pools: [] };
+  await ekle2(kv2, { token: "0xT", hedef: { webhook: "https://x.example/h" } }, iyi, 1000);
+  const gonderilen = [];
+  const r = await tara2(kv2, async () => kotu, async (w, o) => gonderilen.push(o.type), 2000);
+  if (gonderilen.length !== 0 || r.dogrulanmadi !== 1) throw new Error("pool-vanish guard failed " + JSON.stringify({ gonderilen, r }));
+  console.log("watch: pool-vanish guard ok");
+}

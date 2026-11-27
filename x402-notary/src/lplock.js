@@ -84,8 +84,10 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
   // 1) V2 tarzı havuzları bul
   const adaylar = [];
   for (const q of quotes) {
-    for (const f of ay.v2) adaylar.push({ dex: f.dex, q, p: guvenli(oku(f.factory, V2_FAB, "getPair", [token, q.address])) });
-    if (ay.aerodrome) for (const st of [false, true]) adaylar.push({ dex: st ? "aerodrome-stable" : "aerodrome-volatile", q, p: guvenli(oku(ay.aerodrome.factory, AERO_FAB, "getPool", [token, q.address, st])), aero: true });
+    // Fabrika sorguları asla geri çevrilmez (yoksa sıfır adres döner): HER hata RPC kaynaklıdır ve yükselir.
+    // Aksi halde boş dönen bir RPC cevabı "havuz yok" sanılır ve izlemede sahte VERDICT_CHANGE üretir.
+    for (const f of ay.v2) adaylar.push({ dex: f.dex, q, p: oku(f.factory, V2_FAB, "getPair", [token, q.address]) });
+    if (ay.aerodrome) for (const st of [false, true]) adaylar.push({ dex: st ? "aerodrome-stable" : "aerodrome-volatile", q, p: oku(ay.aerodrome.factory, AERO_FAB, "getPool", [token, q.address, st]), aero: true });
   }
   const havuzlar = (await Promise.all(adaylar.map(async (a) => { const adr = await a.p; return adr && adr !== zeroAddress ? { dex: a.dex, q: a.q, pair: getAddress(adr), aero: a.aero } : null; }))).filter(Boolean);
 
@@ -147,7 +149,7 @@ export async function lpKilitAnalizi(okur, ay, token, simdi) {
   if (ay.v3) {
     const isler = [];
     for (const q of quotes) for (const fee of ay.v3.fees) isler.push((async () => {
-      const p = await guvenli(oku(ay.v3.factory, V3_FAB, "getPool", [token, q.address, fee]));
+      const p = await oku(ay.v3.factory, V3_FAB, "getPool", [token, q.address, fee]);
       if (!p || p === zeroAddress) return;
       const [qBak, tBak] = await Promise.all([oku(q.address, ERC20, "balanceOf", [p]).catch(() => 0n), oku(token, ERC20, "balanceOf", [p]).catch(() => 0n)]);
       v3.push({ dex: "uniswap-v3", pool: getAddress(p), fee, quote: q.sym, reserves: { token: formatUnits(tBak, ondalik), [q.sym]: formatUnits(qBak, q.dec) }, liquidityUsd: (() => { const u = usd(q, qBak); return u === null ? null : Math.round(u * 2 * 100) / 100; })() });

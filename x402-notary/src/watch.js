@@ -23,6 +23,7 @@ export function anlik(j, simdi) {
     protectedPct: j.protectedPctWeightedByLiquidity ?? null,
     liquidityUsd: Math.round(((lq.v2Style || 0) + (lq.v3 || 0)) * 100) / 100,
     kilitler,
+    havuzlar: (j.v2Pools || []).map((p) => p.pair).sort(),
   };
 }
 
@@ -109,6 +110,8 @@ export async function izlemeleriTara(kv, analiz, bildir, simdi, { sinir = 40 } =
     try {
       if (!onbellek.has(w.token)) onbellek.set(w.token, await analiz(w.token));
       let yeni = anlik(onbellek.get(w.token), simdi);
+      // Havuz sözleşmeleri yok olmaz: önce görülen bir havuz şimdi yoksa bu bir okuma hatasıdır, olay üretme.
+      if (w.son?.havuzlar && w.son.havuzlar.some((p) => !yeni.havuzlar.includes(p))) { sonuc.dogrulanmadi = (sonuc.dogrulanmadi || 0) + 1; onbellek.delete(w.token); continue; }
       let { olaylar: ol, gonderildi } = olaylar(w.son, yeni, w.gonderildi);
       if (ol.length) {
         // Doğrulama: bir değişiklik görülünce zinciri bağımsız olarak bir kez daha oku. Yalnızca iki
