@@ -46,6 +46,8 @@ function kur(env, url) {
     liteDaily: env.LITE_DAILY || "20",
     dataPrice: env.DATA_PRICE || "$0.001",
     holderDataDaily: env.HOLDER_DATA_DAILY || "2000",
+    exitCheckPrice: env.EXIT_CHECK_PRICE || "$0.02",
+    exitGuardPrice: env.EXIT_GUARD_PRICE || "$3",
     toolManifests: TOOL_MANIFESTS,
     publicUrl: env.PUBLIC_URL || new URL(url).origin,
   });
@@ -60,10 +62,11 @@ export default {
       return new Response(JSON.stringify({ error: "service not configured" }), { status: 503, headers: { "content-type": "application/json" } });
     }
   },
-  // Saatlik cron: LP izlemelerini tarar ve webhook'lara olay gönderir.
+  // Cron (10 dakikada bir): Exit Guard her seferinde, LP izlemeleri yarım saatte bir taranır.
   async scheduled(_event, env, ctx) {
     if (!env.WATCH_KV) return;
     const u = env.PUBLIC_URL || "https://agichainai-notary.aslanklc04.workers.dev";
-    ctx.waitUntil(kur(env, u).tara(env.WATCH_KV).then((r) => console.log("WATCH_SCAN", JSON.stringify(r))));
+    const dk = new Date(_event.scheduledTime || Date.now()).getUTCMinutes();
+    ctx.waitUntil(kur(env, u).tara(env.WATCH_KV, { lp: dk < 10 || (dk >= 30 && dk < 40) }).then((r) => console.log("WATCH_SCAN", JSON.stringify(r))));
   },
 };

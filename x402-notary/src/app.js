@@ -16,8 +16,9 @@ import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/
 import { createPublicClient, createWalletClient, http, fallback, getAddress, isHex, parseAbi, formatUnits, formatEther, encodeAbiParameters, keccak256, toHex, pad } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { lpKilitAnalizi } from "./lplock.js";
+import { cuzdanOlc, tokenKesfet, tokenListesi, bekciEkle, bekciOku, bekcileriTara, olayGovdesi as bekciGovdesi, GUARD_GUN, MAX_TOKEN, OLAY_TURLERI } from "./exitguard.js";
 
-export const SURUM = "1.3.2";
+export const SURUM = "1.4.0";
 
 const NOTER_USDC_ABI = parseAbi([
   "function kaydet(bytes32 ozet, string etiket, uint256 asgariAgi) returns (uint256)",
@@ -205,6 +206,9 @@ export function uygulamaKur(ay) {
       "/base/gas": { get: { operationId: "baseGas", summary: "Live Base gas and suggested EIP-1559 fees", "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: D_USD } }, responses: { "200": { description: "Gas" }, "402": { description: "Payment required" } } } },
       "/base/price": { get: { operationId: "basePrice", summary: "USD price of a Base ERC-20 from its deepest V2-style pool", "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: D_USD } }, parameters: [{ name: "token", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "Price" }, "402": { description: "Payment required" } } } },
       "/base/balance": { get: { operationId: "baseBalance", summary: "ETH and ERC-20 balances of a Base address", "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: D_USD } }, parameters: [{ name: "address", in: "query", required: true, schema: { type: "string" } }, { name: "tokens", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Balances" }, "402": { description: "Payment required" } } } },
+      "/exit-check": { get: { operationId: "exitCheck", summary: "Can this wallet still sell each of its positions? (full-balance sell simulated from the wallet)", "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: "0.02" } }, parameters: [{ name: "wallet", in: "query", required: true, schema: { type: "string" } }, { name: "tokens", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Exit report" }, "402": { description: "Payment required" } } } },
+      "/exit-check/lite": { get: { operationId: "exitCheckLite", summary: "Free exit summary for a wallet", parameters: [{ name: "wallet", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "Summary" }, "429": { description: "Daily free limit reached" } } } },
+      "/exit-guard": { post: { operationId: "exitGuard", summary: "30-day Exit Guard: webhook when a held position can no longer be sold cleanly", "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: "3" } }, requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["wallet", "webhook"], properties: { wallet: { type: "string" }, webhook: { type: "string" }, tokens: { type: "array", items: { type: "string" } } } } } } }, responses: { "200": { description: "Guard created" }, "402": { description: "Payment required" }, "400": { description: "Invalid input; nothing charged" } } } },
       "/token-check/lite": {
         get: { operationId: "tokenCheckLite", summary: "Free verdict and risk codes", parameters: [{ name: "token", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "Lite verdict" }, "429": { description: "Daily free limit reached" } } },
       },
@@ -231,7 +235,7 @@ export function uygulamaKur(ay) {
     },
     "x-discovery": { ownershipProofs: [] },
   }));
-  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/token-check", ay.publicUrl + "/base/gas", ay.publicUrl + "/base/price", ay.publicUrl + "/base/balance", ay.publicUrl + "/notarize", ay.publicUrl + "/lp-lock", ay.publicUrl + "/lp-watch"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
+  app.get("/.well-known/x402", (c) => json(c, { version: 1, resources: [ay.publicUrl + "/exit-check", ay.publicUrl + "/exit-guard", ay.publicUrl + "/token-check", ay.publicUrl + "/base/gas", ay.publicUrl + "/base/price", ay.publicUrl + "/base/balance", ay.publicUrl + "/notarize", ay.publicUrl + "/lp-lock", ay.publicUrl + "/lp-watch"], instructions: "POST JSON {hash, label?}. Free lookup: GET /record/{hash}." }));
 
   app.get("/", async (c) => {
     return json(c, {
@@ -241,6 +245,9 @@ export function uygulamaKur(ay) {
       endpoints: {
         "POST /notarize": { price: typeof ay.price === "string" ? ay.price + " USDC" : ay.price, body: { hash: "0x + 64 hex chars (SHA-256 of your data)", label: "optional, up to ~50 characters" }, paid: "x402 (exact, USDC on Base)" },
         "POST /pass/activate": { price: "free", body: { tx: "0x… hash of a transaction that burned at least 1,000,000 AGI (transfer to 0x…dEaD)" }, description: "Activates a 30-day AGI pass for the burning wallet (2x burn = 60 days, up to 12x). With a pass, send the signed AGI-HOLDER header for free paid-endpoint calls within daily limits. Status: GET /pass/{address}" },
+        "GET /exit-check?wallet=0x…": { price: "$0.02 USDC", description: "For every token a wallet holds: can the FULL balance still be sold from that wallet, sell tax for that wallet, price impact, exit value, LP rug risk", paid: "x402 (exact, USDC on Base)" },
+        "GET /exit-check/lite?wallet=0x…": { price: "free (10/day per IP)", description: "Summary only: positions, blocked, at risk" },
+        "POST /exit-guard": { price: "$3 USDC for 30 days (or free with an AGI pass)", body: { wallet: "0x…", webhook: "https://…", tokens: "optional array" }, description: "Exit Guard: every position is sold in simulation from your wallet ~every 10 minutes; webhook on SELL_BLOCKED, SELL_TAX_UP, EXIT_VALUE_DROP, PROTECTION_DROP, UNLOCK_SOON, UNLOCKED. Status: GET /exit-guard/{id}" },
         "GET /token-check?token=0x…": { price: "$0.01 USDC (free with an AGI pass via the AGI-HOLDER header)", description: "Pre-trade check: buy/transfer/sell simulation (honeypot, taxes), owner powers, proxy, LP lock; verdict SAFE/CAUTION/DANGER", paid: "x402 (exact, USDC on Base)" },
         "GET /token-check/lite?token=0x…": { price: "free (daily limit per IP)", description: "Verdict, score and risk codes only" },
         "POST /lp-watch": { price: "$0.05 USDC", body: { token: "0x… (Base ERC-20)", webhook: "https://… (receives JSON events)" }, description: "30-day LP watch: webhook before an LP lock unlocks, when the locked share or liquidity drops, or the verdict changes. Status: GET /lp-watch/{id} (free)", paid: "x402 (exact, USDC on Base)" },
@@ -524,12 +531,12 @@ export function uygulamaKur(ay) {
   const D_FIYAT = ay.dataPrice || "$0.001";
   const D_USD = typeof D_FIYAT === "string" ? D_FIYAT.replace("$", "") : "0.001";
   const D_GUN = Number(ay.holderDataDaily || 2000);
-  const odemeli = async (c, { kaynak, bazaar, uret, etiket }) => {
+  const odemeli = async (c, { kaynak, bazaar, uret, etiket, fiyat = D_FIYAT, gunluk = D_GUN, onek = "d" }) => {
     const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
     const holder = c.req.header("AGI-HOLDER");
     await hazirla();
-    const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: D_FIYAT, network: ay.network, maxTimeoutSeconds: 120 });
-    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, bazaar); return json(c, { ...pr, holderAccess: { pass: `burn ${H_MIN / 10n ** 18n} AGI to 0x000000000000000000000000000000000000dEaD, then POST {"tx":"0x…"} to ${ay.publicUrl}/pass/activate for ${GECIS_GUN} days`, header: "AGI-HOLDER", burnAgi: String(H_MIN / 10n ** 18n), days: GECIS_GUN, dailyLimit: D_GUN, docs: "https://agichainai.com/pages/agi.html" } }, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
+    const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: fiyat, network: ay.network, maxTimeoutSeconds: 120 });
+    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, kaynak, hata, bazaar); return json(c, { ...pr, holderAccess: { pass: `burn ${H_MIN / 10n ** 18n} AGI to 0x000000000000000000000000000000000000dEaD, then POST {"tx":"0x…"} to ${ay.publicUrl}/pass/activate for ${GECIS_GUN} days`, header: "AGI-HOLDER", burnAgi: String(H_MIN / 10n ** 18n), days: GECIS_GUN, dailyLimit: gunluk, docs: "https://agichainai.com/pages/agi.html" } }, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
     if (!baslik && !holder) return odemeIste();
     let sonuc;
     try { sonuc = await uret(); }
@@ -539,7 +546,7 @@ export function uygulamaKur(ay) {
       return json(c, { error: "Could not read the chain right now; nothing was charged." }, 503);
     }
     if (holder && !baslik) {
-      const h = await holderDogrula({ okur, kv: c.env?.WATCH_KV, agi: ay.adres.agi, minimum: H_MIN, gunluk: D_GUN, baslik: holder, onek: "d" });
+      const h = await holderDogrula({ okur, kv: c.env?.WATCH_KV, agi: ay.adres.agi, minimum: H_MIN, gunluk, baslik: holder, onek });
       if (!h.ok) return odemeIste(h.reason);
       console.log("HOLDER_" + etiket, h.address);
       return json(c, { ...sonuc, access: { type: "agi-holder", address: h.address, remainingToday: h.remaining } });
@@ -636,11 +643,128 @@ export function uygulamaKur(ay) {
     if (!w) return json(c, { error: "not found or expired" }, 404);
     return json(c, { watchId: w.id, token: w.token, expiresAt: new Date(w.bitis * 1000).toISOString(), lastCheck: new Date(w.son.t * 1000).toISOString(), current: { verdict: w.son.verdict, rugRisk: w.son.rugRisk, protectedPct: w.son.protectedPct, liquidityUsd: w.son.liquidityUsd, locks: w.son.kilitler }, eventsSent: w.olaySayisi });
   });
+  // ───────── Exit Guard: elde tutulan pozisyonların çıkış ölçümü ve izlenmesi ─────────
+  const X_FIYAT = ay.exitCheckPrice || "$0.02";
+  const X_USD = X_FIYAT.replace("$", "");
+  const G_FIYAT = ay.exitGuardPrice || "$3";
+  const G_USD = G_FIYAT.replace("$", "");
+  const xHata = (m) => { const e = new Error(m); e.kullanici = true; return e; };
+  const cuzdanKontrol = async (cuzdan, tokenGirdi) => {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(cuzdan)) throw xHata("wallet must be a 0x-prefixed 20-byte address");
+    let tl = tokenListesi(tokenGirdi || "");
+    const k = await tokenKesfet(okur, getAddress(cuzdan));
+    for (const t of k.tokens) if (!tl.includes(t)) tl.push(t);
+    tl = tl.filter((t) => t.toLowerCase() !== ay.lp.weth.toLowerCase() && t.toLowerCase() !== ay.lp.usdc.toLowerCase()).slice(0, MAX_TOKEN);
+    const o = await cuzdanOlc(okur, ay.lp, cuzdan, tl, Math.floor(Date.now() / 1000));
+    if (o.positions.length && o.positions.every((p) => p.gecici)) throw new Error("chain read failed");
+    return { tokenler: tl, sonBlok: k.sonBlok, olcum: o };
+  };
+  const xRapor = (cuzdan, r) => {
+    const held = r.olcum.positions.filter((p) => p.held);
+    const riskli = held.filter((p) => p.sellable === false || (p.sellTaxPct ?? 0) > 10 || (p.exitLossPct ?? 0) > 20 || p.rugRisk === "HIGH");
+    return {
+      wallet: getAddress(cuzdan),
+      summary: { positions: held.length, sellable: held.filter((p) => p.sellable).length, blocked: held.filter((p) => p.sellable === false).length, atRisk: riskli.length, exitValueEth: Math.round(held.reduce((a, p) => a + (p.exitValueEth || 0), 0) * 1e8) / 1e8, exitValueUsd: r.olcum.ethUsd ? Math.round(held.reduce((a, p) => a + (p.exitValueEth || 0), 0) * r.olcum.ethUsd * 100) / 100 : null },
+      positions: held.map(({ lp, gecici, measurable, held: _h, ...p }) => p),
+      notHeldOrUnmeasurable: r.olcum.positions.filter((p) => !p.held).map((p) => ({ token: p.token, symbol: p.symbol, reason: p.reason || (p.measurable === false ? "unmeasurable" : p.error || "zero balance") })),
+      tokensScanned: r.tokenler.length,
+      method: "Each position is sold in an eth_call from your own wallet address (state override puts a sell routine at the wallet), against the deepest V2-style WETH pool, for your full balance: measures whether it can be sold, the sell tax applied to your wallet, price impact and what you would receive. No transaction is sent. Tokens: those you pass plus any received in roughly the last 11 hours.",
+      checkedAt: new Date().toISOString(),
+    };
+  };
+  const X_ORNEK = { wallet: "0x…", summary: { positions: 3, sellable: 2, blocked: 1, atRisk: 1, exitValueEth: 0.41, exitValueUsd: 1230.5 }, positions: [{ token: "0x…", symbol: "MEME", balance: "1250000", sellable: true, sellTaxPct: 0, priceImpactPct: 2.1, exitLossPct: 2.4, exitValueEth: 0.4, exitValueUsd: 1200, rugRisk: "LOW" }, { token: "0x…", symbol: "TRAP", sellable: false, error: "transfer: BLOCKED", rugRisk: "HIGH" }] };
+  const xBazaar = declareDiscoveryExtension({ input: { wallet: "0x0000000000000000000000000000000000000001", tokens: "0x532f27101965dd16442E59d40670FaF5eBB142E4" }, inputSchema: { properties: { wallet: { type: "string", description: "Base wallet that holds the tokens" }, tokens: { type: "string", description: "optional comma-separated token addresses (max 20); recent incoming tokens are found automatically" } }, required: ["wallet"] }, output: { example: X_ORNEK } });
+  const xKaynak = () => ({ url: ay.publicUrl + "/exit-check", description: `Can your agent still get out? For every token a Base wallet holds, simulates selling the FULL balance from that wallet (catches blacklists, wallet-specific taxes and taxes raised after you bought) and returns sellable / sell tax / price impact / what you would receive, plus LP rug risk. $${X_USD} USDC per wallet check, no API key. Nothing is charged if the chain cannot be read.`, mimeType: "application/json", serviceName: "AGIChainAI Exit Guard", tags: ["exit", "honeypot", "rug-pull", "portfolio", "positions", "base", "trading-bot", "token-safety"], iconUrl: "https://agichainai.com/assets/agi-token-256.png" });
+  app.get("/exit-check", (c) => odemeli(c, { etiket: "EXIT_CHECK", fiyat: X_FIYAT, gunluk: 100, onek: "x", bazaar: xBazaar, kaynak: xKaynak(), uret: async () => { const cz = String(c.req.query("wallet") || ""); return xRapor(cz, await cuzdanKontrol(cz, c.req.query("tokens"))); } }));
+
+  // Ücretsiz özet: kaç pozisyon, kaçı satılamıyor/riskli (token ayrıntısı yok), IP başına günde 10.
+  app.get("/exit-check/lite", async (c) => {
+    const cz = String(c.req.query("wallet") || "");
+    if (!/^0x[0-9a-fA-F]{40}$/.test(cz)) return json(c, { error: "add ?wallet=0x… (Base address)" }, 400);
+    const s = await ipSiniri(c.env?.WATCH_KV, "x" + (c.req.header("CF-Connecting-IP") || ""), 10);
+    if (!s.ok) return json(c, { error: `free lite limit reached; full report: ${ay.publicUrl}/exit-check ($${X_USD})` }, 429);
+    try {
+      const r = xRapor(cz, await cuzdanKontrol(cz, c.req.query("tokens")));
+      return json(c, { wallet: r.wallet, summary: r.summary, blockedOrRisky: r.positions.filter((p) => p.sellable === false || (p.sellTaxPct ?? 0) > 10 || (p.exitLossPct ?? 0) > 20 || p.rugRisk === "HIGH").map((p) => p.symbol || p.token), full: `${ay.publicUrl}/exit-check?wallet=${r.wallet} ($${X_USD}: per-position tax, impact, exit value)`, guard: `POST ${ay.publicUrl}/exit-guard ($${G_USD} for ${GUARD_GUN} days of webhook alerts)`, remainingToday: s.remaining, checkedAt: r.checkedAt });
+    } catch (e) {
+      if (e.kullanici) return json(c, { error: e.message }, 400);
+      return json(c, { error: "Could not read the chain right now." }, 503);
+    }
+  });
+
+  const G_SEMA = { type: "object", required: ["wallet", "webhook"], properties: { wallet: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$" }, webhook: { type: "string", description: "https URL that receives a JSON POST for each event" }, tokens: { type: "array", items: { type: "string" }, description: "optional; tokens received later are added automatically (max 20)" } } };
+  const G_ORNEK = { guardId: "3f2a…", wallet: "0x…", expiresAt: "2026-12-27T00:00:00.000Z", watching: 4, events: OLAY_TURLERI, baseline: X_ORNEK.summary };
+  const gBazaar = declareDiscoveryExtension({ method: "POST", input: { wallet: "0x0000000000000000000000000000000000000001", webhook: "https://example.com/hooks/exit" }, inputSchema: G_SEMA, bodyType: "json", output: { example: G_ORNEK } });
+  const gKaynak = () => ({ url: ay.publicUrl + "/exit-guard", description: `${GUARD_GUN}-day Exit Guard for a trading agent's wallet: every position (up to ${MAX_TOKEN}, new ones added automatically) is sold in simulation from your wallet about every 10 minutes; your webhook gets an event when a sell starts failing (blacklist/honeypot switch), the sell tax for your wallet rises, what you would receive drops 30%+, the LP lock protection falls, or an LP lock is about to unlock. Changes are confirmed by a second independent read. $${G_USD} USDC once, or free with a 30-day AGI pass.`, mimeType: "application/json", serviceName: "AGIChainAI Exit Guard", tags: ["exit", "monitoring", "webhook", "honeypot", "rug-pull", "portfolio", "base", "trading-bot"], iconUrl: "https://agichainai.com/assets/agi-token-256.png" });
+  app.post("/exit-guard", async (c) => {
+    const baslik = c.req.header("PAYMENT-SIGNATURE") || c.req.header("X-PAYMENT");
+    const holder = c.req.header("AGI-HOLDER");
+    await hazirla();
+    const sartlar = await sunucu.buildPaymentRequirements({ scheme: "exact", payTo: hesap.address, price: G_FIYAT, network: ay.network, maxTimeoutSeconds: 120 });
+    const odemeIste = async (hata) => { const pr = await sunucu.createPaymentRequiredResponse(sartlar, gKaynak(), hata, gBazaar); return json(c, { ...pr, holderAccess: { pass: `burn ${H_MIN / 10n ** 18n} AGI to 0x000000000000000000000000000000000000dEaD, then POST {"tx":"0x…"} to ${ay.publicUrl}/pass/activate`, header: "AGI-HOLDER", guardsPerDay: 3, note: "with a pass, the guard lasts until the pass expires (max 30 days)" } }, 402, { "PAYMENT-REQUIRED": encodePaymentRequiredHeader(pr) }); };
+    let g = {}; try { g = await c.req.json(); } catch {}
+    const cuzdan = String(g.wallet || ""), webhook = String(g.webhook || "");
+    if (!baslik && !holder) return odemeIste();
+    if (!c.env?.WATCH_KV) return json(c, { error: "Exit Guard is not enabled yet; nothing was charged." }, 503);
+    if (!webhookGecerli(webhook)) return json(c, { error: "webhook must be a public https URL (no IPs, no credentials); nothing was charged." }, 400);
+    let r;
+    try { r = await cuzdanKontrol(cuzdan, g.tokens); }
+    catch (e) { if (e.kullanici) return json(c, { error: e.message + "; nothing was charged." }, 400); return json(c, { error: "Could not read the chain right now; nothing was charged." }, 503); }
+    let odeme = null, erisim = "usdc", bitisUst = null, odeyen = null, odemeTx = null;
+    if (holder && !baslik) {
+      const h = await holderDogrula({ okur, kv: c.env.WATCH_KV, agi: ay.adres.agi, minimum: H_MIN, gunluk: 3, baslik: holder, onek: "gx" });
+      if (!h.ok) return odemeIste(h.reason);
+      erisim = "agi-pass"; odeyen = h.address; bitisUst = h.passExpiresAt ? Math.floor(Date.parse(h.passExpiresAt) / 1000) : null;
+    } else {
+      let yuk; try { yuk = decodePaymentSignatureHeader(baslik); } catch { return odemeIste("invalid payment header"); }
+      const sart = sartlar.find((x) => x.scheme === yuk.accepted?.scheme && x.network === yuk.accepted?.network) || sartlar[0];
+      let dog; try { dog = await sunucu.verifyPayment(yuk, sart, gBazaar); } catch (e) { return odemeIste("verification failed: " + (e.message || e)); }
+      if (!dog.isValid) return odemeIste(dog.invalidReason || "payment invalid");
+      try { const pr = await sunucu.createPaymentRequiredResponse(sartlar, gKaynak(), undefined, gBazaar); yuk.extensions = { ...(pr.extensions || {}), ...(yuk.extensions || {}) }; if (!yuk.resource) yuk.resource = pr.resource; } catch {}
+      let tahsil; try { tahsil = await sunucu.settlePayment(yuk, sart, gBazaar); } catch (e) { return odemeIste("settlement failed: " + (e.message || e)); }
+      if (!tahsil.success) return odemeIste(tahsil.errorReason || "settlement failed");
+      odeyen = tahsil.payer || dog.payer; odemeTx = tahsil.transaction; odeme = tahsil;
+      try { c.executionCtx.waitUntil(yakmaDene()); } catch { yakmaDene(); }
+    }
+    const simdi = Math.floor(Date.now() / 1000);
+    const { bekci, ilkOlaylar } = await bekciEkle(c.env.WATCH_KV, { cuzdan, webhook, tokenler: r.tokenler, sonBlok: r.sonBlok, olcum: r.olcum, odeyen, odemeTx, erisim }, simdi);
+    if (bitisUst && bitisUst < bekci.bitis) { bekci.bitis = bitisUst; await c.env.WATCH_KV.put("g:" + bekci.id, JSON.stringify(bekci), { expiration: bekci.bitis + 86400 }); }
+    console.log("EXIT_GUARD_CREATED", JSON.stringify({ id: bekci.id, erisim, odeyen, tx: odemeTx, tokens: r.tokenler.length }));
+    return json(c, { guardId: bekci.id, wallet: bekci.cuzdan, webhook, expiresAt: new Date(bekci.bitis * 1000).toISOString(), status: ay.publicUrl + "/exit-guard/" + bekci.id, watching: r.tokenler.length, events: OLAY_TURLERI, baseline: xRapor(cuzdan, r).summary, alreadyDue: ilkOlaylar, addTokens: `POST ${ay.publicUrl}/exit-guard/${bekci.id}/tokens {"tokens":["0x…"]}`, access: erisim, payment: odeme ? { payer: odeme.payer, transaction: odeme.transaction, network: odeme.network } : null }, 200, odeme ? { "PAYMENT-RESPONSE": encodePaymentResponseHeader(odeme) } : {});
+  });
+  app.get("/exit-guard/:id", async (c) => {
+    if (!c.env?.WATCH_KV) return json(c, { error: "not enabled" }, 503);
+    const g = await bekciOku(c.env.WATCH_KV, c.req.param("id"));
+    if (!g) return json(c, { error: "not found or expired" }, 404);
+    return json(c, { guardId: g.id, wallet: g.cuzdan, expiresAt: new Date(g.bitis * 1000).toISOString(), lastCheck: new Date(g.t * 1000).toISOString(), eventsSent: g.olaySayisi, positions: Object.entries(g.son).filter(([, v]) => v && v.held).map(([t, v]) => ({ token: t, symbol: v.sym, balance: v.bal, sellable: v.ok, sellTaxPct: v.tax, exitValueEth: v.eth })), watching: g.tokenler.length });
+  });
+  app.post("/exit-guard/:id/tokens", async (c) => {
+    if (!c.env?.WATCH_KV) return json(c, { error: "not enabled" }, 503);
+    const g = await bekciOku(c.env.WATCH_KV, c.req.param("id"));
+    if (!g) return json(c, { error: "not found or expired" }, 404);
+    let b = {}; try { b = await c.req.json(); } catch {}
+    let tl; try { tl = tokenListesi(b.tokens || []); } catch (e) { return json(c, { error: e.message }, 400); }
+    for (const t of tl) if (!g.tokenler.includes(t) && g.tokenler.length < MAX_TOKEN) g.tokenler.push(t);
+    await c.env.WATCH_KV.put("g:" + g.id, JSON.stringify(g), { expiration: g.bitis + 86400 });
+    return json(c, { guardId: g.id, watching: g.tokenler, max: MAX_TOKEN });
+  });
+
   // Zamanlanmış tarama (index.js scheduled → tara)
-  const tara = async (kv) => izlemeleriTara(kv, (t) => lpKilitAnalizi(okur, ay.lp, t), async (w, o, s) => {
+  const lpTara = async (kv) => izlemeleriTara(kv, (t) => lpKilitAnalizi(okur, ay.lp, t), async (w, o, s) => {
     if (!w.hedef?.webhook) return;
     await fetch(w.hedef.webhook, { method: "POST", headers: { "content-type": "application/json", "user-agent": "AGIChainAI-LP-Watch/1" }, body: JSON.stringify(olayGovdesi(w, o, s)), signal: AbortSignal.timeout(8000) });
   }, Math.floor(Date.now() / 1000));
+  const bekciTara = async (kv) => {
+    let sonBlok = null; try { sonBlok = await okur.getBlockNumber({ cacheTime: 0 }); } catch {}
+    return bekcileriTara(kv, {
+      sonBlok,
+      olc: (cz, tl) => cuzdanOlc(okur, ay.lp, cz, tl, Math.floor(Date.now() / 1000)),
+      kesfet: (cz, o) => tokenKesfet(okur, cz, { ...o, parca: 5000 }),
+      bildir: async (g, ol, olcum) => { await fetch(g.webhook, { method: "POST", headers: { "content-type": "application/json", "user-agent": "AGIChainAI-Exit-Guard/1" }, body: JSON.stringify(bekciGovdesi(g, ol, olcum)), signal: AbortSignal.timeout(8000) }); },
+    }, Math.floor(Date.now() / 1000));
+  };
+  // LP izlemeleri ~30 dakikada bir, Exit Guard her çalışmada (cron 10 dakika).
+  const tara = async (kv, { lp = true } = {}) => ({ guard: await bekciTara(kv), lp: lp ? await lpTara(kv) : null });
 
   app.notFound((c) => json(c, { error: "not found", see: ay.publicUrl + "/" }, 404));
   // Hata ayrıntısı herkese açık bilgiden ibarettir (anahtar asla mesajlarda yer almaz); ilk sürümde teşhis için döndürülür.
